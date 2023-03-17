@@ -34,8 +34,8 @@ type Config struct {
 	// in the AgentID field of each flow. Accepted values are: any (default), ipv4, ipv6.
 	// If the AgentIP configuration property is set, this property has no effect.
 	AgentIPType string `env:"AGENT_IP_TYPE" envDefault:"any"`
-	// Export selects the flows' exporter protocol. Accepted values are: grpc (default) or kafka
-	// or ipfix+udp or ipfix+tcp.
+	// Export selects the flows' exporter protocol. Accepted values are: grpc (default), kafka,
+	// ipfix+udp, ipfix+tcp or direct-flp.
 	Export string `env:"EXPORT" envDefault:"grpc"`
 	// TargetHost is the host name or IP of the target Flow collector, when the EXPORT variable is
 	// set to "grpc"
@@ -128,4 +128,6 @@ type Config struct {
 	KafkaTLSUserKeyPath string `env:"KAFKA_TLS_USER_KEY_PATH"`
 	// ProfilePort sets the listening port for Go's Pprof tool. If it is not set, profile is disabled
 	ProfilePort int `env:"PROFILE_PORT"`
+	// FLPConfig ...
+	FLPConfig string `env:"FLP_CONFIG"`
 }

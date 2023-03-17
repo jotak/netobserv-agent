@@ -257,10 +257,15 @@ func buildFlowExporter(cfg *Config) (node.TerminalFunc[[]*flow.Record], error) {
 			return nil, err
 		}
 		return ipfix.ExportFlows, nil
+	case "direct-flp":
+		flpExporter, err := exporter.StartDirectFLP(cfg.FLPConfig)
+		if err != nil {
+			return nil, err
+		}
+		return flpExporter.ExportFlows, nil
 	default:
 		return nil, fmt.Errorf("wrong export type %s. Admitted values are grpc, kafka", cfg.Export)
 	}
-
 }
 
 // Run a Flows agent. The function will keep running in the same thread
