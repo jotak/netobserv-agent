@@ -2,7 +2,6 @@ package exporter
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	flpconfig "github.com/netobserv/flowlogs-pipeline/pkg/config"
@@ -13,6 +12,7 @@ import (
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/flow"
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/pbflow"
 	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v2"
 )
 
 var log = logrus.WithField("component", "exporter/DirectFLP")
@@ -22,9 +22,14 @@ type DirectFLP struct {
 	flowPackets chan *pbflow.Records
 }
 
-func StartDirectFLP(strConfig string) (*DirectFLP, error) {
+func StartDirectFLP(jsonConfig string) (*DirectFLP, error) {
 	var cfg flpconfig.ConfigFileStruct
-	if err := json.Unmarshal([]byte(strConfig), &cfg); err != nil {
+	// Note that, despite jsonConfig being json, we use yaml unmarshaler because the json one
+	// is screwed up for HTTPClientConfig in github.com/prometheus/common/config (used for Loki)
+	// This is ok as YAML is a superset of JSON.
+	// E.g. try unmarshaling `{"clientConfig":{"authorization":{}}}` as a api.WriteLoki
+	// See also https://github.com/prometheus/prometheus/issues/11816
+	if err := yaml.Unmarshal([]byte(jsonConfig), &cfg); err != nil {
 		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
 
