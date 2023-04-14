@@ -83,36 +83,6 @@ volatile const u8 trace_messages = 0;
 
 const u8 ip4in6[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
 
-// sets the TCP header flags for connection information
-static inline void set_flags(struct tcphdr *th, u16 *flags) {
-    //If both ACK and SYN are set, then it is server -> client communication during 3-way handshake. 
-    if (th->ack && th->syn) {
-        *flags |= SYN_ACK_FLAG;
-    } else if (th->ack && th->fin ) {
-        // If both ACK and FIN are set, then it is graceful termination from server.
-        *flags |= FIN_ACK_FLAG;
-    } else if (th->ack && th->rst ) {
-        // If both ACK and RST are set, then it is abrupt connection termination. 
-        *flags |= RST_ACK_FLAG;
-    } else if (th->fin) {
-        *flags |= FIN_FLAG;
-    } else if (th->syn) {
-        *flags |= SYN_FLAG;
-    } else if (th->ack) {
-        *flags |= ACK_FLAG;
-    } else if (th->rst) {
-        *flags |= RST_FLAG;
-    } else if (th->psh) {
-        *flags |= PSH_FLAG;
-    } else if (th->urg) {
-        *flags |= URG_FLAG;
-    } else if (th->ece) {
-        *flags |= ECE_FLAG;
-    } else if (th->cwr) {
-        *flags |= CWR_FLAG;
-    }
-}
-
 // L4_info structure contains L4 headers parsed information.
 struct l4_info_t {
     // TCP/UDP/SCTP source port in host byte order
@@ -134,23 +104,23 @@ static inline void fill_l4info(void *l4_hdr_start, void *data_end, u8 protocol,
     case IPPROTO_TCP: {
         struct tcphdr *tcp = l4_hdr_start;
         if ((void *)tcp + sizeof(*tcp) <= data_end) {
-            l4_info->src_port = __bpf_ntohs(tcp->source);
-            l4_info->dst_port = __bpf_ntohs(tcp->dest);
-            set_flags(tcp, &l4_info->flags);
+            l4_info->src_port = 0;
+            l4_info->dst_port = 0;
+//            set_flags(tcp, &l4_info->flags);
         }
     } break;
     case IPPROTO_UDP: {
         struct udphdr *udp = l4_hdr_start;
         if ((void *)udp + sizeof(*udp) <= data_end) {
-            l4_info->src_port = __bpf_ntohs(udp->source);
-            l4_info->dst_port = __bpf_ntohs(udp->dest);
+            l4_info->src_port = 0;
+            l4_info->dst_port = 0;
         }
     } break;
     case IPPROTO_SCTP: {
         struct sctphdr *sctph = l4_hdr_start;
         if ((void *)sctph + sizeof(*sctph) <= data_end) {
-            l4_info->src_port = __bpf_ntohs(sctph->source);
-            l4_info->dst_port = __bpf_ntohs(sctph->dest);
+            l4_info->src_port = 0;
+            l4_info->dst_port = 0;
         }
     } break;
     case IPPROTO_ICMP: {
@@ -188,8 +158,8 @@ static inline int fill_iphdr(struct iphdr *ip, void *data_end, flow_id *id, u16 
     __builtin_memcpy(id->dst_ip + sizeof(ip4in6), &ip->daddr, sizeof(ip->daddr));
     id->transport_protocol = ip->protocol;
     fill_l4info(l4_hdr_start, data_end, ip->protocol, &l4_info);
-    id->src_port = l4_info.src_port;
-    id->dst_port = l4_info.dst_port;
+    id->src_port = 0;
+    id->dst_port = 0;
     id->icmp_type = l4_info.icmp_type;
     id->icmp_code = l4_info.icmp_code;
     *flags = l4_info.flags;
@@ -211,8 +181,8 @@ static inline int fill_ip6hdr(struct ipv6hdr *ip, void *data_end, flow_id *id, u
     __builtin_memcpy(id->dst_ip, ip->daddr.in6_u.u6_addr8, 16);
     id->transport_protocol = ip->nexthdr;
     fill_l4info(l4_hdr_start, data_end, ip->nexthdr, &l4_info);
-    id->src_port = l4_info.src_port;
-    id->dst_port = l4_info.dst_port;
+    id->src_port = 0;
+    id->dst_port = 0;
     id->icmp_type = l4_info.icmp_type;
     id->icmp_code = l4_info.icmp_code;
     *flags = l4_info.flags;
