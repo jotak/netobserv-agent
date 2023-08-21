@@ -124,65 +124,18 @@ func NewFlowFetcher(cfg *FlowFetcherConfig) (*FlowFetcher, error) {
 		return nil, fmt.Errorf("rewriting BPF constants definition: %w", err)
 	}
 
-	oldKernel := utils.IskernelOlderthan514()
-
 	//Deleting specs for PCA
-	objects.EgressPcaParse = nil
-	objects.IngressPcaParse = nil
-	delete(spec.Programs, constPcaPort)
-	delete(spec.Programs, constPcaProto)
 
-	// For older kernel (< 5.14) kfree_sbk drop hook doesn't exists
-	if oldKernel {
-		// Here we define another structure similar to the bpf2go created one but w/o the hooks that does not exist in older kernel
-		// Note: if new hooks are added in the future we need to update the following structures manually
-		type NewBpfPrograms struct {
-			EgressFlowParse  *ebpf.Program `ebpf:"egress_flow_parse"`
-			IngressFlowParse *ebpf.Program `ebpf:"ingress_flow_parse"`
-			TraceNetPackets  *ebpf.Program `ebpf:"trace_net_packets"`
-		}
-		type NewBpfObjects struct {
-			NewBpfPrograms
-			BpfMaps
-		}
-		var newObjects NewBpfObjects
-		// remove tcpdrop hook from the spec
-		delete(spec.Programs, tcpDropHook)
-
-		newObjects.NewBpfPrograms = NewBpfPrograms{}
-		if err := spec.LoadAndAssign(&newObjects, nil); err != nil {
-			var ve *ebpf.VerifierError
-			if errors.As(err, &ve) {
-				// Using %+v will print the whole verifier error, not just the last
-				// few lines.
-				log.Infof("Verifier error: %+v", ve)
-			}
-			return nil, fmt.Errorf("loading and assigning BPF objects: %w", err)
-		}
-		// Manually assign maps and programs to the original objects variable
-		// Note for any future maps or programs make sure to copy them manually here
-		objects.DirectFlows = newObjects.DirectFlows
-		objects.AggregatedFlows = newObjects.AggregatedFlows
-		objects.FlowSequences = newObjects.FlowSequences
-		objects.EgressFlowParse = newObjects.EgressFlowParse
-		objects.IngressFlowParse = newObjects.IngressFlowParse
-		objects.TraceNetPackets = newObjects.TraceNetPackets
-		objects.KfreeSkb = nil
-
-	} else {
-		if err := spec.LoadAndAssign(&objects, nil); err != nil {
-			var ve *ebpf.VerifierError
-			if errors.As(err, &ve) {
-				// Using %+v will print the whole verifier error, not just the last
-				// few lines.
-				log.Infof("Verifier error: %+v", ve)
-			}
-			return nil, fmt.Errorf("loading and assigning BPF objects: %w", err)
-		}
+	oldKernel := utils.IskernelOlderthan514()
 	objects, err := kernelSpecificLoadAndAssign(oldKernel, spec)
 	if err != nil {
 		return nil, err
 	}
+
+	objects.EgressPcaParse = nil
+	objects.IngressPcaParse = nil
+	delete(spec.Programs, constPcaPort)
+	delete(spec.Programs, constPcaProto)
 
 	var pktDropsLink link.Link
 	if cfg.PktDrops && !oldKernel {
@@ -676,8 +629,9 @@ func (p *PacketFetcher) LookupAndDeleteMap() map[int][]*byte {
 		packets[id] = append(packets[id], packet...)
 	}
 	return packets
+}
 
-	// DeleteMapsStaleEntries Look for any stale entries in the features maps and delete them
+// DeleteMapsStaleEntries Look for any stale entries in the features maps and delete them
 func (m *FlowFetcher) DeleteMapsStaleEntries(timeOut time.Duration) {
 	m.lookupAndDeleteDNSMap(timeOut)
 	m.lookupAndDeleteRTTMap(timeOut)
