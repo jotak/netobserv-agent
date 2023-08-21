@@ -23,9 +23,6 @@
 #define FIN_ACK_FLAG 0x200
 #define RST_ACK_FLAG 0x400
 
-#define IS_SYN_PACKET(pkt)    ((pkt->flags & SYN_FLAG) || (pkt->flags & SYN_ACK_FLAG))
-#define IS_ACK_PACKET(pkt)    ((pkt->flags & ACK_FLAG) || (pkt->flags & SYN_ACK_FLAG))
-
 #if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && \
     __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 #define bpf_ntohs(x)        __builtin_bswap16(x)
@@ -78,13 +75,13 @@ typedef struct flow_metrics_t {
     // 0 otherwise
     // https://chromium.googlesource.com/chromiumos/docs/+/master/constants/errnos.md
     u8 errno;
-    struct tcp_drops_t {
+    struct pkt_drops_t {
         u32 packets;
         u64 bytes;
         u16 latest_flags;
         u8 latest_state;
         u32 latest_drop_cause;
-    } __attribute__((packed)) tcp_drops;
+    } __attribute__((packed)) pkt_drops;
     struct dns_record_t {
         u16 id;
         u16 flags;
@@ -93,8 +90,8 @@ typedef struct flow_metrics_t {
     u64 flow_rtt;
 } __attribute__((packed)) flow_metrics;
 
-// Force emitting struct tcp_drops into the ELF.
-const struct tcp_drops_t *unused0 __attribute__((unused));
+// Force emitting struct pkt_drops into the ELF.
+const struct pkt_drops_t *unused0 __attribute__((unused));
 
 // Force emitting struct flow_metrics into the ELF.
 const struct flow_metrics_t *unused1 __attribute__((unused));
@@ -125,7 +122,7 @@ typedef struct flow_id_t {
 // Force emitting struct flow_id into the ELF.
 const struct flow_id_t *unused2 __attribute__((unused));
 
-// Standard 4 tuple and a sequence identifier.
+// Standard 4 tuple, transport protocol and a sequence identifier.
 // No need to emit this struct. It's used only in kernel space
 typedef struct flow_seq_id_t {
     u16 src_port;
@@ -133,6 +130,8 @@ typedef struct flow_seq_id_t {
     u8 src_ip[IP_MAX_LEN];
     u8 dst_ip[IP_MAX_LEN];
     u32 seq_id;
+    u8 transport_protocol;
+    u32 if_index; // OS interface index
 } __attribute__((packed)) flow_seq_id;
 
 // Flow record is a tuple containing both flow identifier and metrics. It is used to send
@@ -172,7 +171,6 @@ typedef struct dns_flow_id_t {
     u8 src_ip[IP_MAX_LEN];
     u8 dst_ip[IP_MAX_LEN];
     u16 id;
-    u32 if_index;
     u8 protocol;
 } __attribute__((packed)) dns_flow_id;
 

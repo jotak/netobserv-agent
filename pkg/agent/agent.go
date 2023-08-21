@@ -120,6 +120,7 @@ type ebpfFlowFetcher interface {
 	Register(iface ifaces.Interface) error
 
 	LookupAndDeleteMap() map[ebpf.BpfFlowId]*ebpf.BpfFlowMetrics
+	DeleteMapsStaleEntries(timeOut time.Duration)
 	ReadRingBuf() (ringbuf.Record, error)
 }
 
@@ -155,7 +156,7 @@ func FlowsAgent(cfg *Config) (*Flows, error) {
 		Debug:         debug,
 		Sampling:      cfg.Sampling,
 		CacheMaxSize:  cfg.CacheMaxFlows,
-		TCPDrops:      cfg.EnableTCPDrops,
+		PktDrops:      cfg.EnablePktDrops,
 		DNSTracker:    cfg.EnableDNSTracking,
 		EnableRTT:     cfg.EnableRTT,
 	}
@@ -191,7 +192,7 @@ func flowsAgent(cfg *Config,
 		return iface
 	}
 
-	mapTracer := flow.NewMapTracer(fetcher, cfg.CacheActiveTimeout)
+	mapTracer := flow.NewMapTracer(fetcher, cfg.CacheActiveTimeout, cfg.StaleEntriesEvictTimeout)
 	rbTracer := flow.NewRingBufTracer(fetcher, mapTracer, cfg.CacheActiveTimeout)
 	accounter := flow.NewAccounter(
 		cfg.CacheMaxFlows, cfg.CacheActiveTimeout, time.Now, monotime.Now)

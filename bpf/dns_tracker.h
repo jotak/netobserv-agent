@@ -42,7 +42,6 @@ static inline void find_or_create_dns_flow(flow_id *id, struct dns_header *dns, 
 
 static inline void fill_dns_id (flow_id *id, dns_flow_id *dns_flow, u16 dns_id, bool reverse) {
     dns_flow->id = dns_id;
-    dns_flow->if_index = id->if_index;
     dns_flow->protocol = id->transport_protocol;
     if (reverse) {
         __builtin_memcpy(dns_flow->src_ip, id->dst_ip, IP_MAX_LEN);
@@ -98,7 +97,7 @@ static inline int trace_dns(struct sk_buff *skb) {
         if ((bpf_ntohs(dns.flags) & DNS_QR_FLAG) == 0) { /* dns query */
             fill_dns_id(&id, &dns_req, bpf_ntohs(dns.id), false);
             if (bpf_map_lookup_elem(&dns_flows, &dns_req) == NULL) {
-               u64 ts = bpf_ktime_get_ns();
+                u64 ts = bpf_ktime_get_ns();
                 bpf_map_update_elem(&dns_flows, &dns_req, &ts, BPF_ANY);
             }
             id.direction = EGRESS;

@@ -18,7 +18,6 @@ type BpfDnsFlowId struct {
 	SrcIp    [16]uint8
 	DstIp    [16]uint8
 	Id       uint16
-	IfIndex  uint32
 	Protocol uint8
 }
 
@@ -54,7 +53,7 @@ type BpfFlowMetricsT struct {
 	EndMonoTimeTs   uint64
 	Flags           uint16
 	Errno           uint8
-	TcpDrops        BpfTcpDropsT
+	PktDrops        BpfPktDropsT
 	DnsRecord       BpfDnsRecordT
 	FlowRtt         uint64
 }
@@ -65,14 +64,16 @@ type BpfFlowRecordT struct {
 }
 
 type BpfFlowSeqId struct {
-	SrcPort uint16
-	DstPort uint16
-	SrcIp   [16]uint8
-	DstIp   [16]uint8
-	SeqId   uint32
+	SrcPort           uint16
+	DstPort           uint16
+	SrcIp             [16]uint8
+	DstIp             [16]uint8
+	SeqId             uint32
+	TransportProtocol uint8
+	IfIndex           uint32
 }
 
-type BpfTcpDropsT struct {
+type BpfPktDropsT struct {
 	Packets         uint32
 	Bytes           uint64
 	LatestFlags     uint16

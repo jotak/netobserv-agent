@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/ifaces"
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/utils"
@@ -18,24 +19,26 @@ import (
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/gavv/monotime"
 	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
 
 // $BPF_CLANG and $BPF_CFLAGS are set by the Makefile.
-//go:generate bpf2go -cc $BPF_CLANG -cflags $BPF_CFLAGS -type flow_metrics_t -type flow_id_t -type flow_record_t -type tcp_drops_t -type dns_record_t Bpf ../../bpf/flows.c -- -I../../bpf/headers
+//go:generate bpf2go -cc $BPF_CLANG -cflags $BPF_CFLAGS -type flow_metrics_t -type flow_id_t -type flow_record_t -type pkt_drops_t -type dns_record_t Bpf ../../bpf/flows.c -- -I../../bpf/headers
 
 const (
 	qdiscType = "clsact"
-	// ebpf map names as defined in flows.c
+	// ebpf map names as defined in bpf/maps_definition.h
 	aggregatedFlowsMap = "aggregated_flows"
 	flowSequencesMap   = "flow_sequences"
+	dnsLatencyMap      = "dns_flows"
 	// constants defined in flows.c as "volatile const"
 	constSampling      = "sampling"
 	constTraceMessages = "trace_messages"
 	constEnableRtt     = "enable_rtt"
-	tcpDropHook        = "kfree_skb"
+	pktDropHook        = "kfree_skb"
 	dnsTraceHook       = "net_dev_queue"
 	constPcaPort       = "pca_port"
 	constPcaProto      = "pca_proto"
@@ -57,7 +60,7 @@ type FlowFetcher struct {
 	cacheMaxSize         int
 	enableIngress        bool
 	enableEgress         bool
-	tcpDropsTracePoint   link.Link
+	pktDropsTracePoint   link.Link
 	dnsTrackerTracePoint link.Link
 }
 
@@ -67,7 +70,7 @@ type FlowFetcherConfig struct {
 	Debug         bool
 	Sampling      int
 	CacheMaxSize  int
-	TCPDrops      bool
+	PktDrops      bool
 	DNSTracker    bool
 	EnableRTT     bool
 }
@@ -78,7 +81,6 @@ func NewFlowFetcher(cfg *FlowFetcherConfig) (*FlowFetcher, error) {
 			Warn("can't remove mem lock. The agent could not be able to start eBPF programs")
 	}
 
-	objects := BpfObjects{}
 	spec, err := LoadBpf()
 	if err != nil {
 		return nil, fmt.Errorf("loading BPF data: %w", err)
@@ -106,6 +108,12 @@ func NewFlowFetcher(cfg *FlowFetcherConfig) (*FlowFetcher, error) {
 	if enableRtt == 0 {
 		// Cannot set the size of map to be 0 so set it to 1.
 		spec.Maps[flowSequencesMap].MaxEntries = uint32(1)
+	} else {
+		log.Debugf("RTT calculations are enabled")
+	}
+
+	if !cfg.DNSTracker {
+		spec.Maps[dnsLatencyMap].MaxEntries = 1
 	}
 
 	if err := spec.RewriteConstants(map[string]interface{}{
@@ -171,18 +179,14 @@ func NewFlowFetcher(cfg *FlowFetcherConfig) (*FlowFetcher, error) {
 			}
 			return nil, fmt.Errorf("loading and assigning BPF objects: %w", err)
 		}
+	objects, err := kernelSpecificLoadAndAssign(oldKernel, spec)
+	if err != nil {
+		return nil, err
 	}
 
-	/*
-	 * since we load the program only when the we start we need to release
-	 * memory used by cached kernel BTF see https://github.com/cilium/ebpf/issues/1063
-	 * for more details.
-	 */
-	btf.FlushKernelSpec()
-
-	var tcpDropsLink link.Link
-	if cfg.TCPDrops && !oldKernel {
-		tcpDropsLink, err = link.Tracepoint("skb", tcpDropHook, objects.KfreeSkb, nil)
+	var pktDropsLink link.Link
+	if cfg.PktDrops && !oldKernel {
+		pktDropsLink, err = link.Tracepoint("skb", pktDropHook, objects.KfreeSkb, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to attach the BPF program to kfree_skb tracepoint: %w", err)
 		}
@@ -210,7 +214,7 @@ func NewFlowFetcher(cfg *FlowFetcherConfig) (*FlowFetcher, error) {
 		cacheMaxSize:         cfg.CacheMaxSize,
 		enableIngress:        cfg.EnableIngress,
 		enableEgress:         cfg.EnableEgress,
-		tcpDropsTracePoint:   tcpDropsLink,
+		pktDropsTracePoint:   pktDropsLink,
 		dnsTrackerTracePoint: dnsTrackerLink,
 	}, nil
 }
@@ -354,8 +358,8 @@ func (m *FlowFetcher) Close() error {
 
 	var errs []error
 
-	if m.tcpDropsTracePoint != nil {
-		m.tcpDropsTracePoint.Close()
+	if m.pktDropsTracePoint != nil {
+		m.pktDropsTracePoint.Close()
 	}
 
 	if m.dnsTrackerTracePoint != nil {
@@ -473,6 +477,7 @@ func (m *FlowFetcher) LookupAndDeleteMap() map[BpfFlowId]*BpfFlowMetrics {
 		*metricPtr = metric
 		flow[id] = metricPtr
 	}
+
 	return flow
 }
 
@@ -671,4 +676,112 @@ func (p *PacketFetcher) LookupAndDeleteMap() map[int][]*byte {
 		packets[id] = append(packets[id], packet...)
 	}
 	return packets
+
+	// DeleteMapsStaleEntries Look for any stale entries in the features maps and delete them
+func (m *FlowFetcher) DeleteMapsStaleEntries(timeOut time.Duration) {
+	m.lookupAndDeleteDNSMap(timeOut)
+	m.lookupAndDeleteRTTMap(timeOut)
+}
+
+// lookupAndDeleteDNSMap iterate over DNS queries map and delete any stale DNS requests
+// entries which never get responses for.
+func (m *FlowFetcher) lookupAndDeleteDNSMap(timeOut time.Duration) {
+	monotonicTimeNow := monotime.Now()
+	dnsMap := m.objects.DnsFlows
+	var dnsKey BpfDnsFlowId
+	var dnsVal uint64
+
+	if dnsMap != nil {
+		iterator := dnsMap.Iterate()
+		for iterator.Next(&dnsKey, &dnsVal) {
+			if time.Duration(uint64(monotonicTimeNow)-dnsVal) >= timeOut {
+				if err := dnsMap.Delete(dnsKey); err != nil {
+					log.WithError(err).WithField("dnsKey", dnsKey).
+						Warnf("couldn't delete DNS record entry")
+				}
+			}
+		}
+	}
+}
+
+// lookupAndDeleteRTTMap iterate over flows sequence map and delete any
+// stale flows that we never get responses for.
+func (m *FlowFetcher) lookupAndDeleteRTTMap(timeOut time.Duration) {
+	monotonicTimeNow := monotime.Now()
+	rttMap := m.objects.FlowSequences
+	var rttKey BpfFlowSeqId
+	var rttVal uint64
+
+	if rttMap != nil {
+		iterator := rttMap.Iterate()
+		for iterator.Next(&rttKey, &rttVal) {
+			if time.Duration(uint64(monotonicTimeNow)-rttVal) >= timeOut {
+				if err := rttMap.Delete(rttKey); err != nil {
+					log.WithError(err).WithField("rttKey", rttKey).
+						Warnf("couldn't delete RTT record entry")
+				}
+			}
+		}
+	}
+
+}
+
+// kernelSpecificLoadAndAssign based on kernel version it will load only the supported ebPF hooks
+func kernelSpecificLoadAndAssign(oldKernel bool, spec *ebpf.CollectionSpec) (BpfObjects, error) {
+	objects := BpfObjects{}
+
+	// For older kernel (< 5.14) kfree_sbk drop hook doesn't exists
+	if oldKernel {
+		// Here we define another structure similar to the bpf2go created one but w/o the hooks that does not exist in older kernel
+		// Note: if new hooks are added in the future we need to update the following structures manually
+		type NewBpfPrograms struct {
+			EgressFlowParse  *ebpf.Program `ebpf:"egress_flow_parse"`
+			IngressFlowParse *ebpf.Program `ebpf:"ingress_flow_parse"`
+			TraceNetPackets  *ebpf.Program `ebpf:"trace_net_packets"`
+		}
+		type NewBpfObjects struct {
+			NewBpfPrograms
+			BpfMaps
+		}
+		var newObjects NewBpfObjects
+		// remove pktdrop hook from the spec
+		delete(spec.Programs, pktDropHook)
+		newObjects.NewBpfPrograms = NewBpfPrograms{}
+		if err := spec.LoadAndAssign(&newObjects, nil); err != nil {
+			var ve *ebpf.VerifierError
+			if errors.As(err, &ve) {
+				// Using %+v will print the whole verifier error, not just the last
+				// few lines.
+				log.Infof("Verifier error: %+v", ve)
+			}
+			return objects, fmt.Errorf("loading and assigning BPF objects: %w", err)
+		}
+		// Manually assign maps and programs to the original objects variable
+		// Note for any future maps or programs make sure to copy them manually here
+		objects.DirectFlows = newObjects.DirectFlows
+		objects.AggregatedFlows = newObjects.AggregatedFlows
+		objects.FlowSequences = newObjects.FlowSequences
+		objects.EgressFlowParse = newObjects.EgressFlowParse
+		objects.IngressFlowParse = newObjects.IngressFlowParse
+		objects.TraceNetPackets = newObjects.TraceNetPackets
+		objects.KfreeSkb = nil
+	} else {
+		if err := spec.LoadAndAssign(&objects, nil); err != nil {
+			var ve *ebpf.VerifierError
+			if errors.As(err, &ve) {
+				// Using %+v will print the whole verifier error, not just the last
+				// few lines.
+				log.Infof("Verifier error: %+v", ve)
+			}
+			return objects, fmt.Errorf("loading and assigning BPF objects: %w", err)
+		}
+	}
+	/*
+	 * since we load the program only when the we start we need to release
+	 * memory used by cached kernel BTF see https://github.com/cilium/ebpf/issues/1063
+	 * for more details.
+	 */
+	btf.FlushKernelSpec()
+
+	return objects, nil
 }
