@@ -33,7 +33,7 @@ struct {
 //PerfEvent Array for Packet Payloads
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-	__type(key, int);
+	__type(key, u32);
 	__type(value, u32);
     __uint(max_entries, 256);
 } packet_record SEC(".maps");

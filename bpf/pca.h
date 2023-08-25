@@ -4,16 +4,20 @@
 #include "utils.h"
 #include <string.h>
 
-static int attach_packet_payload(void *data, void *data_end, struct __sk_buff *skb, u64 current_time ){
+static int attach_packet_payload(void *data, void *data_end, struct __sk_buff *skb){
         payload_meta meta;
         u64 flags = BPF_F_CURRENT_CPU;
         // Enable the flag to add packet header
         // Packet payload follows immediately after the meta struct
         u32 packetSize = (__u32)(data_end-data);
+        
+        // Record the current time.
+        __u64 current_time = bpf_ktime_get_ns();
+        
         // For packets which are allocated non-linearly struct __sk_buff does not necessarily 
         // has all data lined up in memory but instead can be part of scatter gather lists. 
         // This command pulls data from the buffer but incurs data copying penalty.
-        if (packetSize < skb->len){
+        if (packetSize <= skb->len){
             packetSize = skb->len;
             if (bpf_skb_pull_data(skb, skb->len)){
                 return TC_ACT_UNSPEC;
@@ -30,7 +34,7 @@ static int attach_packet_payload(void *data, void *data_end, struct __sk_buff *s
         if (bpf_perf_event_output(skb, &packet_record, flags, &meta, sizeof(meta))){
             return TC_ACT_OK;
         }
-        return TC_ACT_OK;
+        return TC_ACT_UNSPEC;
 }
 
 static inline bool validate_pca_filter(u8 ipproto, void *ipheaderend, void *data_end){
@@ -48,7 +52,7 @@ static inline bool validate_pca_filter(u8 ipproto, void *ipheaderend, void *data
         sourcePort = tcp_header->source;
         destPort = tcp_header->dest;
     }
-    else{
+    else if (ipproto == IPPROTO_UDP){
         struct udphdr *udp_header = ipheaderend;
         if ((void *)udp_header + sizeof(*udp_header) > data_end) {
             return false;	
@@ -56,6 +60,8 @@ static inline bool validate_pca_filter(u8 ipproto, void *ipheaderend, void *data
         sourcePort = udp_header->source;
         destPort = udp_header->dest;
     }
+    else 
+        return false;
     if (sourcePort == bpf_htons(pca_port) || destPort == bpf_htons(pca_port)){
         return true;
     }
@@ -65,19 +71,16 @@ static inline bool validate_pca_filter(u8 ipproto, void *ipheaderend, void *data
 static inline int export_packet_payload (struct __sk_buff *skb) {
     void *data_end = (void *)(long)skb->data_end;
     void *data = (void *)(long)skb->data;
-    
     struct ethhdr *eth  = data;
     struct iphdr  *ip;
-
-    // Record the current time.
-    __u64 current_time = bpf_ktime_get_ns();
     
     if ((void *)eth + sizeof(*eth) > data_end) {
        return TC_ACT_UNSPEC;
     }
 
     // Only IPv4 and IPv6 packets captured
-    if (eth->h_proto != bpf_htons(ETH_P_IP) && (eth->h_proto != bpf_htons(ETH_P_IPV6))) {
+    u16 ethType = bpf_ntohs(eth->h_proto);
+    if (ethType != ETH_P_IP && ethType != ETH_P_IPV6) {
        return TC_ACT_UNSPEC;	
     }   
     
@@ -87,7 +90,7 @@ static inline int export_packet_payload (struct __sk_buff *skb) {
     }
 
     if (validate_pca_filter(ip->protocol, (void *)ip + sizeof(*ip), data_end )){
-        return attach_packet_payload(data, data_end, skb, current_time);
+        return attach_packet_payload(data, data_end, skb);
     }
     return TC_ACT_UNSPEC;
 }

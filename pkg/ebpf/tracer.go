@@ -42,6 +42,7 @@ const (
 	dnsTraceHook       = "net_dev_queue"
 	constPcaPort       = "pca_port"
 	constPcaProto      = "pca_proto"
+	pcaRecordsMap      = "packet_record"
 )
 
 var log = logrus.WithField("component", "ebpf.FlowFetcher")
@@ -124,13 +125,15 @@ func NewFlowFetcher(cfg *FlowFetcherConfig) (*FlowFetcher, error) {
 		return nil, fmt.Errorf("rewriting BPF constants definition: %w", err)
 	}
 
-	//Deleting specs for PCA
-
 	oldKernel := utils.IskernelOlderthan514()
 	objects, err := kernelSpecificLoadAndAssign(oldKernel, spec)
 	if err != nil {
 		return nil, err
 	}
+
+	//Deleting specs for PCA
+	// Always set pcaRecordsMap to the minimum in FlowFetcher - PCA and Flow Fetcher are mutually exclusive.
+	spec.Maps[pcaRecordsMap].MaxEntries = 1
 
 	objects.EgressPcaParse = nil
 	objects.IngressPcaParse = nil
