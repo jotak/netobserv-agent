@@ -9,10 +9,10 @@ static int attach_packet_payload(void *data, void *data_end, struct __sk_buff *s
         u64 flags = BPF_F_CURRENT_CPU;
         // Enable the flag to add packet header
         // Packet payload follows immediately after the meta struct
-        u32 packetSize = (__u32)(data_end-data);
+        u32 packetSize = (u32)(data_end-data);
         
         // Record the current time.
-        __u64 current_time = bpf_ktime_get_ns();
+        u64 current_time = bpf_ktime_get_ns();
         
         // For packets which are allocated non-linearly struct __sk_buff does not necessarily 
         // has all data lined up in memory but instead can be part of scatter gather lists. 
@@ -26,7 +26,7 @@ static int attach_packet_payload(void *data, void *data_end, struct __sk_buff *s
         // Set flag's upper 32 bits with the size of the paylaod and the bpf_perf_event_output will 
         // attach the specified amount of bytes from packet to the perf event
         // https://github.com/xdp-project/xdp-tutorial/tree/9b25f0a039179aca1f66cba5492744d9f09662c1/tracing04-xdp-tcpdump       
-        flags |= (__u64)packetSize << 32;
+        flags |= (u64)packetSize << 32;
 
         meta.if_index = skb->ifindex;
         meta.pkt_len = packetSize;
@@ -59,6 +59,14 @@ static inline bool validate_pca_filter(u8 ipproto, void *ipheaderend, void *data
         }
         sourcePort = udp_header->source;
         destPort = udp_header->dest;
+    }
+    else if (ipproto == IPPROTO_SCTP){
+        struct sctphdr *sctp_header = ipheaderend;
+        if ((void *)sctp_header + sizeof(*sctp_header) > data_end) {
+                return false;	
+            }
+            sourcePort = sctp_header->source;
+            destPort = sctp_header->dest;        
     }
     else 
         return false;

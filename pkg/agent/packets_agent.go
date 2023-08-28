@@ -35,7 +35,6 @@ type Packets struct {
 	status Status
 }
 
-// ebpfPacketFetcher abstracts the interface of ebpf.FlowFetcher to allow dependency injection in tests
 type ebpfPacketFetcher interface {
 	io.Closer
 	Register(iface ifaces.Interface) error
