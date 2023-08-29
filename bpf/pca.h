@@ -38,6 +38,10 @@ static int attach_packet_payload(void *data, void *data_end, struct __sk_buff *s
 }
 
 static inline bool validate_pca_filter(u8 ipproto, void *ipheaderend, void *data_end){
+    // If filters: pca_proto and pca_port are not specified, export packet
+    if (pca_proto == 0 && pca_port == 0)
+        return true;
+
     //Only export packets with protocol set by ENV var PCA_FILTER
     u16 sourcePort, destPort;
     if (ipproto != pca_proto) {

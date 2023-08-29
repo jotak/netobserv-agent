@@ -481,17 +481,22 @@ func NewPacketFetcher(
 
 	pcaPort := 0
 	pcaProto := 0
-	filters := strings.Split(strings.ToLower(pcaFilters), ",")
-	if filters[0] == "tcp" {
-		pcaProto = syscall.IPPROTO_TCP
-	} else if filters[0] == "udp" {
-		pcaProto = syscall.IPPROTO_UDP
-	} else {
-		return nil, fmt.Errorf("pca protocol %s not supported. Please use tcp or udp", filters[0])
-	}
-	pcaPort, err = strconv.Atoi(filters[1])
-	if err != nil {
-		return nil, err
+
+	if pcaFilters != "" {
+		filters := strings.Split(strings.ToLower(pcaFilters), ",")
+		if filters[0] == "tcp" {
+			pcaProto = syscall.IPPROTO_TCP
+		} else if filters[0] == "udp" {
+			pcaProto = syscall.IPPROTO_UDP
+		} else if filters[0] == "sctp" {
+			pcaProto = syscall.IPPROTO_SCTP
+		} else {
+			return nil, fmt.Errorf("pca protocol %s not supported. Please use tcp/udp/sctp", filters[0])
+		}
+		pcaPort, err = strconv.Atoi(filters[1])
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if err := spec.RewriteConstants(map[string]interface{}{
@@ -500,7 +505,7 @@ func NewPacketFetcher(
 	}); err != nil {
 		return nil, fmt.Errorf("rewriting BPF constants definition: %w", err)
 	}
-	plog.Infof("PCA Filter- Protocol: %d, Port: %d", pcaProto, pcaPort)
+	plog.Infof("PCA Filter [Protocol: %d, Port: %d]", pcaProto, pcaPort)
 
 	if err := spec.LoadAndAssign(&objects, nil); err != nil {
 		var ve *ebpf.VerifierError
