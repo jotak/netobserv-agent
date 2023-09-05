@@ -72,9 +72,11 @@ static inline bool validate_pca_filter(u8 ipproto, void *ipheaderend, void *data
             sourcePort = sctp_header->source;
             destPort = sctp_header->dest;        
     }
-    else 
+    else {
         return false;
-    if (sourcePort == bpf_htons(pca_port) || destPort == bpf_htons(pca_port)){
+    }
+    u16 pca_port_end = bpf_htons(pca_port);
+    if (sourcePort == pca_port_end || destPort == pca_port_end){
         return true;
     }
     return false;
