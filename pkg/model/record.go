@@ -60,6 +60,7 @@ type Record struct {
 	TimeFlowRtt            time.Duration
 	DupList                []map[string]uint8
 	NetworkMonitorEventsMD []string
+	UdnID                  string
 }
 
 func NewRecord(
@@ -133,6 +134,10 @@ func Accumulate(r *ebpf.BpfFlowMetrics, src *ebpf.BpfFlowMetrics) {
 			copy(r.NetworkEvents[r.NetworkEventsIdx][:], md[:])
 			r.NetworkEventsIdx = (r.NetworkEventsIdx + 1) % maxNetworkEvents
 		}
+	}
+
+	if src.TranslatedFlow.ZoneId != 0 {
+		r.TranslatedFlow = src.TranslatedFlow
 	}
 }
 
