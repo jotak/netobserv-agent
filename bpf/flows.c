@@ -51,6 +51,21 @@
  */
 // #include "network_events_monitoring.h"
 
+static inline int add_observation(flow_metrics *aggregate_flow, u32 if_index, u8 direction) {
+    if (aggregate_flow->nb_observations < MAX_FLOW_OBSERVATIONS) {
+        for (u8 i = 0; i < aggregate_flow->nb_observations; i++) {
+            if (aggregate_flow->pkt_observations[i].if_index == if_index && aggregate_flow->pkt_observations[i].direction == direction) {
+                return 0;
+            }
+        }
+        aggregate_flow->pkt_observations[aggregate_flow->nb_observations].if_index = if_index;
+        aggregate_flow->pkt_observations[aggregate_flow->nb_observations].direction = direction;
+        aggregate_flow->nb_observations++;
+        return 1;
+    }
+    return 0;
+}
+
 static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
     // If sampling is defined, will only parse 1 out of "sampling" flows
     if (sampling > 1 && (bpf_get_prandom_u32() % sampling) != 0) {
@@ -70,7 +85,25 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
     // Have we already seen this packet and created a flow?
     flow_id *existing_flow_id = get_flow_for_packet(&pkt_unique_id);
     if (existing_flow_id != NULL) {
-        // TODO: Update flow with new info
+        // Only add pkt_observations info, no more
+        flow_metrics *aggregate_flow = (flow_metrics *)bpf_map_lookup_elem(&aggregated_flows, existing_flow_id);
+        if (aggregate_flow != NULL) {
+            if (add_observation(aggregate_flow, skb->ifindex, direction) == 1) {
+                bpf_map_update_elem(&aggregated_flows, existing_flow_id, aggregate_flow, BPF_EXIST);
+            }
+        } else {
+            // Flow might exist in another per-CPU map, or was flushed recently.
+            // Create empty flow with just pkt_observations info 
+            u64 current_ts = bpf_ktime_get_ns(); // Record the current time first.
+            flow_metrics new_flow = {
+                .nb_observations = 1,
+                .start_mono_time_ts = current_ts,
+                .end_mono_time_ts = current_ts,
+            };
+            new_flow.pkt_observations[0].if_index = skb->ifindex;
+            new_flow.pkt_observations[0].direction = direction;
+            bpf_map_update_elem(&aggregated_flows, existing_flow_id, &new_flow, BPF_NOEXIST);
+        }
         return TC_ACT_OK;
     }
 
@@ -98,6 +131,12 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
         return TC_ACT_OK;
     }
 
+    // store flow_id for this packet
+    long ret = bpf_map_update_elem(&pkt_flow_map, &pkt_unique_id, &id, BPF_ANY);
+    if (ret != 0) {
+        increase_counter(HASHMAP_PACKETS_CANT_UPDATE);
+    }
+
     int dns_errno = 0;
     if (enable_dns_tracking) {
         dns_errno = track_dns_packet(skb, &pkt);
@@ -106,7 +145,6 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
     // a spinlocked alternative version and use it selectively https://lwn.net/Articles/779120/
     flow_metrics *aggregate_flow = (flow_metrics *)bpf_map_lookup_elem(&aggregated_flows, &id);
     if (aggregate_flow != NULL) {
-        bpf_printk("found existing flow, src IP = %d.%d.%d.%d\n", id.src_ip[15], id.src_ip[14], id.src_ip[13], id.src_ip[12]);
         aggregate_flow->packets += 1;
         aggregate_flow->bytes += skb->len;
         aggregate_flow->end_mono_time_ts = pkt.current_ts;
@@ -121,6 +159,7 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
         aggregate_flow->dns_record.flags = pkt.dns_flags;
         aggregate_flow->dns_record.latency = pkt.dns_latency;
         aggregate_flow->dns_record.errno = dns_errno;
+        add_observation(aggregate_flow, skb->ifindex, direction);
         long ret = bpf_map_update_elem(&aggregated_flows, &id, aggregate_flow, BPF_ANY);
         if (ret != 0) {
             u32 *error_counter_p = NULL;
@@ -143,7 +182,6 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
         }
     } else {
         // Key does not exist in the map, and will need to create a new entry.
-        bpf_printk("flow not found, src IP = %d.%d.%d.%d\n", id.src_ip[15], id.src_ip[14], id.src_ip[13], id.src_ip[12]);
         u64 rtt = 0;
         if (enable_rtt && id.transport_protocol == IPPROTO_TCP) {
             rtt = MIN_RTT;
@@ -197,9 +235,6 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
     }
     return TC_ACT_OK;
 }
-
-// static inline void add_observation(struct __sk_buff *skb, u8 direction) {
-// }
 
 SEC("tc_ingress")
 int tc_ingress_flow_parse(struct __sk_buff *skb) {

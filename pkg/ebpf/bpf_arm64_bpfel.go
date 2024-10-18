@@ -36,6 +36,14 @@ type BpfDnsRecordT struct {
 	Errno   uint8
 }
 
+type BpfFilterActionT uint32
+
+const (
+	BpfFilterActionTACCEPT             BpfFilterActionT = 0
+	BpfFilterActionTREJECT             BpfFilterActionT = 1
+	BpfFilterActionTMAX_FILTER_ACTIONS BpfFilterActionT = 2
+)
+
 type BpfFilterKeyT struct {
 	PrefixLen uint32
 	IpData    [16]uint8
@@ -58,7 +66,7 @@ type BpfFilterValueT struct {
 	IcmpType     uint8
 	IcmpCode     uint8
 	Direction    BpfDirectionT
-	Action       uint32
+	Action       BpfFilterActionT
 	TcpFlags     BpfTcpFlagsT
 	Ip           [16]uint8
 }

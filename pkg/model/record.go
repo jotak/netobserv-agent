@@ -96,7 +96,16 @@ func Accumulate(r *ebpf.BpfFlowMetrics, src *ebpf.BpfFlowMetrics) {
 	}
 	// Accumulate interfaces + directions
 	iObs := uint8(0)
+outer:
 	for r.NbObservations < 4 && iObs < src.NbObservations {
+		for u := uint8(0); u < r.NbObservations; u++ {
+			if r.PktObservations[u].Direction == src.PktObservations[iObs].Direction &&
+				r.PktObservations[u].IfIndex == src.PktObservations[iObs].IfIndex {
+				// Ignore if already exists
+				iObs++
+				continue outer
+			}
+		}
 		r.PktObservations[r.NbObservations] = src.PktObservations[iObs]
 		r.NbObservations++
 		iObs++

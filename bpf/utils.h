@@ -363,7 +363,7 @@ static inline void increase_counter(u32 key) {
 
 static inline flow_id* get_flow_for_packet(pkt_id *pkt_unique_id) {
     flow_id *stored_id = (flow_id *)bpf_map_lookup_elem(&pkt_flow_map, pkt_unique_id);
-    if (stored_id == NULL) {
+    if (stored_id == NULL && pkt_unique_id->tstamp != 0) {
         // Search again with tstamp 0
         u64 tstamp = pkt_unique_id->tstamp;
         pkt_unique_id->tstamp = 0;
