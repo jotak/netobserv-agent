@@ -49,7 +49,7 @@
  * Defines an Network events monitoring tracker,
  * which runs inside flow_monitor. Is optional.
  */
-#include "network_events_monitoring.h"
+// #include "network_events_monitoring.h"
 
 static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
     // If sampling is defined, will only parse 1 out of "sampling" flows
@@ -58,11 +58,28 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
         return TC_ACT_OK;
     }
     do_sampling = 1;
-    pkt_info pkt;
-    __builtin_memset(&pkt, 0, sizeof(pkt));
 
+    // Set unique identifier for this packet
+    pkt_id pkt_unique_id;
+    __builtin_memset(&pkt_unique_id, 0, sizeof(pkt_unique_id));
+
+    pkt_unique_id.hash = skb->hash;
+    pkt_unique_id.skb_ptr = (u64)(void*)skb;
+    pkt_unique_id.tstamp = skb->tstamp;
+
+    // Have we already seen this packet and created a flow?
+    flow_id *existing_flow_id = get_flow_for_packet(&pkt_unique_id);
+    if (existing_flow_id != NULL) {
+        // TODO: Update flow with new info
+        return TC_ACT_OK;
+    }
+
+    // Create new flow
     flow_id id;
     __builtin_memset(&id, 0, sizeof(id));
+
+    pkt_info pkt;
+    __builtin_memset(&pkt, 0, sizeof(pkt));
 
     pkt.current_ts = bpf_ktime_get_ns(); // Record the current time first.
     pkt.id = &id;
@@ -75,12 +92,8 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
         return TC_ACT_OK;
     }
 
-    //Set extra fields
-    id.if_index = skb->ifindex;
-    id.direction = direction;
-
     // check if this packet need to be filtered if filtering feature is enabled
-    bool skip = check_and_do_flow_filtering(&id, pkt.flags);
+    bool skip = check_and_do_flow_filtering(&pkt);
     if (skip) {
         return TC_ACT_OK;
     }
@@ -93,6 +106,7 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
     // a spinlocked alternative version and use it selectively https://lwn.net/Articles/779120/
     flow_metrics *aggregate_flow = (flow_metrics *)bpf_map_lookup_elem(&aggregated_flows, &id);
     if (aggregate_flow != NULL) {
+        bpf_printk("found existing flow, src IP = %d.%d.%d.%d\n", id.src_ip[15], id.src_ip[14], id.src_ip[13], id.src_ip[12]);
         aggregate_flow->packets += 1;
         aggregate_flow->bytes += skb->len;
         aggregate_flow->end_mono_time_ts = pkt.current_ts;
@@ -110,7 +124,7 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
         long ret = bpf_map_update_elem(&aggregated_flows, &id, aggregate_flow, BPF_ANY);
         if (ret != 0) {
             u32 *error_counter_p = NULL;
-            u32 initVal = 1, key = HASHMAP_FLOWS_DROPPED_KEY;
+            u32 initVal = 1, key = HASHMAP_FLOWS_DROPPED;
             // usually error -16 (-EBUSY) is printed here.
             // In this case, the flow is dropped, as submitting it to the ringbuffer would cause
             // a duplicated UNION of flows (two different flows with partial aggregation of the same packets),
@@ -129,6 +143,7 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
         }
     } else {
         // Key does not exist in the map, and will need to create a new entry.
+        bpf_printk("flow not found, src IP = %d.%d.%d.%d\n", id.src_ip[15], id.src_ip[14], id.src_ip[13], id.src_ip[12]);
         u64 rtt = 0;
         if (enable_rtt && id.transport_protocol == IPPROTO_TCP) {
             rtt = MIN_RTT;
@@ -136,6 +151,8 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
         flow_metrics new_flow = {
             .packets = 1,
             .bytes = skb->len,
+            .nb_observations = 1,
+            .eth_protocol = pkt.eth_protocol,
             .start_mono_time_ts = pkt.current_ts,
             .end_mono_time_ts = pkt.current_ts,
             .flags = pkt.flags,
@@ -146,6 +163,10 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
             .dns_record.errno = dns_errno,
             .flow_rtt = rtt,
         };
+        new_flow.pkt_observations[0].if_index = skb->ifindex;
+        new_flow.pkt_observations[0].direction = direction;
+        __builtin_memcpy(new_flow.dst_mac, pkt.dst_mac, ETH_ALEN);
+        __builtin_memcpy(new_flow.src_mac, pkt.src_mac, ETH_ALEN);
 
         // even if we know that the entry is new, another CPU might be concurrently inserting a flow
         // so we need to specify BPF_ANY
@@ -176,6 +197,9 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
     }
     return TC_ACT_OK;
 }
+
+// static inline void add_observation(struct __sk_buff *skb, u8 direction) {
+// }
 
 SEC("tc_ingress")
 int tc_ingress_flow_parse(struct __sk_buff *skb) {

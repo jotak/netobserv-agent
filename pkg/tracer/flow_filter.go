@@ -2,12 +2,9 @@ package tracer
 
 import (
 	"fmt"
-	"net"
 	"strconv"
 	"strings"
-	"syscall"
 
-	cilium "github.com/cilium/ebpf"
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/ebpf"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
@@ -41,124 +38,124 @@ func NewFilter(objects *ebpf.BpfObjects, cfg *FilterConfig) *Filter {
 
 func (f *Filter) ProgramFilter() error {
 	log.Infof("Flow filter config: %v", f.config)
-	key, err := f.getFilterKey(f.config)
-	if err != nil {
-		return fmt.Errorf("failed to get filter key: %w", err)
-	}
+	// key, err := f.getFilterKey(f.config)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to get filter key: %w", err)
+	// }
 
-	val, err := f.getFilterValue(f.config)
-	if err != nil {
-		return fmt.Errorf("failed to get filter value: %w", err)
-	}
+	// val, err := f.getFilterValue(f.config)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to get filter value: %w", err)
+	// }
 
-	err = f.objects.FilterMap.Update(key, val, cilium.UpdateAny)
-	if err != nil {
-		return fmt.Errorf("failed to update filter map: %w", err)
-	}
+	// err = f.objects.FilterMap.Update(key, val, cilium.UpdateAny)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to update filter map: %w", err)
+	// }
 
-	log.Infof("Programmed filter with key: %v, value: %v", key, val)
+	// log.Infof("Programmed filter with key: %v, value: %v", key, val)
 
 	return nil
 }
 
-func (f *Filter) getFilterKey(config *FilterConfig) (ebpf.BpfFilterKeyT, error) {
-	key := ebpf.BpfFilterKeyT{}
+// func (f *Filter) getFilterKey(config *FilterConfig) (ebpf.BpfFilterKeyT, error) {
+// 	key := ebpf.BpfFilterKeyT{}
 
-	ip, ipNet, err := net.ParseCIDR(config.FilterIPCIDR)
-	if err != nil {
-		return key, fmt.Errorf("failed to parse FlowFilterIPCIDR: %w", err)
-	}
-	if ip.To4() != nil {
-		copy(key.IpData[:], ip.To4())
-	} else {
-		copy(key.IpData[:], ip.To16())
-	}
-	pfLen, _ := ipNet.Mask.Size()
-	key.PrefixLen = uint32(pfLen)
+// 	ip, ipNet, err := net.ParseCIDR(config.FilterIPCIDR)
+// 	if err != nil {
+// 		return key, fmt.Errorf("failed to parse FlowFilterIPCIDR: %w", err)
+// 	}
+// 	if ip.To4() != nil {
+// 		copy(key.IpData[:], ip.To4())
+// 	} else {
+// 		copy(key.IpData[:], ip.To16())
+// 	}
+// 	pfLen, _ := ipNet.Mask.Size()
+// 	key.PrefixLen = uint32(pfLen)
 
-	return key, nil
-}
+// 	return key, nil
+// }
 
 // nolint:cyclop
-func (f *Filter) getFilterValue(config *FilterConfig) (ebpf.BpfFilterValueT, error) {
-	val := ebpf.BpfFilterValueT{}
+// func (f *Filter) getFilterValue(config *FilterConfig) (ebpf.BpfFilterValueT, error) {
+// 	val := ebpf.BpfFilterValueT{}
 
-	switch config.FilterDirection {
-	case "Ingress":
-		val.Direction = ebpf.BpfDirectionTINGRESS
-	case "Egress":
-		val.Direction = ebpf.BpfDirectionTEGRESS
-	default:
-		val.Direction = ebpf.BpfDirectionTMAX_DIRECTION
-	}
+// 	switch config.FilterDirection {
+// 	case "Ingress":
+// 		val.Direction = ebpf.BpfDirectionTINGRESS
+// 	case "Egress":
+// 		val.Direction = ebpf.BpfDirectionTEGRESS
+// 	default:
+// 		val.Direction = ebpf.BpfDirectionTMAX_DIRECTION
+// 	}
 
-	switch config.FilterAction {
-	case "Reject":
-		val.Action = ebpf.BpfFilterActionTREJECT
-	case "Accept":
-		val.Action = ebpf.BpfFilterActionTACCEPT
-	default:
-		val.Action = ebpf.BpfFilterActionTMAX_FILTER_ACTIONS
-	}
+// 	switch config.FilterAction {
+// 	case "Reject":
+// 		val.Action = ebpf.BpfFilterActionTREJECT
+// 	case "Accept":
+// 		val.Action = ebpf.BpfFilterActionTACCEPT
+// 	default:
+// 		val.Action = ebpf.BpfFilterActionTMAX_FILTER_ACTIONS
+// 	}
 
-	switch config.FilterProtocol {
-	case "TCP":
-		val.Protocol = syscall.IPPROTO_TCP
-	case "UDP":
-		val.Protocol = syscall.IPPROTO_UDP
-	case "SCTP":
-		val.Protocol = syscall.IPPROTO_SCTP
-	case "ICMP":
-		val.Protocol = syscall.IPPROTO_ICMP
-	case "ICMPv6":
-		val.Protocol = syscall.IPPROTO_ICMPV6
-	}
+// 	switch config.FilterProtocol {
+// 	case "TCP":
+// 		val.Protocol = syscall.IPPROTO_TCP
+// 	case "UDP":
+// 		val.Protocol = syscall.IPPROTO_UDP
+// 	case "SCTP":
+// 		val.Protocol = syscall.IPPROTO_SCTP
+// 	case "ICMP":
+// 		val.Protocol = syscall.IPPROTO_ICMP
+// 	case "ICMPv6":
+// 		val.Protocol = syscall.IPPROTO_ICMPV6
+// 	}
 
-	val.DstPortStart, val.DstPortEnd = getDstPortsRange(config)
-	val.DstPort1, val.DstPort2 = getDstPorts(config)
-	val.SrcPortStart, val.SrcPortEnd = getSrcPortsRange(config)
-	val.SrcPort1, val.SrcPort2 = getSrcPorts(config)
-	val.PortStart, val.PortEnd = getPortsRange(config)
-	val.Port1, val.Port2 = getPorts(config)
-	val.IcmpType = uint8(config.FilterIcmpType)
-	val.IcmpCode = uint8(config.FilterIcmpCode)
+// 	val.DstPortStart, val.DstPortEnd = getDstPortsRange(config)
+// 	val.DstPort1, val.DstPort2 = getDstPorts(config)
+// 	val.SrcPortStart, val.SrcPortEnd = getSrcPortsRange(config)
+// 	val.SrcPort1, val.SrcPort2 = getSrcPorts(config)
+// 	val.PortStart, val.PortEnd = getPortsRange(config)
+// 	val.Port1, val.Port2 = getPorts(config)
+// 	val.IcmpType = uint8(config.FilterIcmpType)
+// 	val.IcmpCode = uint8(config.FilterIcmpCode)
 
-	if config.FilterPeerIP != "" {
-		ip := net.ParseIP(config.FilterPeerIP)
-		if ip.To4() != nil {
-			copy(val.Ip[:], ip.To4())
-		} else {
-			copy(val.Ip[:], ip.To16())
-		}
-	}
+// 	if config.FilterPeerIP != "" {
+// 		ip := net.ParseIP(config.FilterPeerIP)
+// 		if ip.To4() != nil {
+// 			copy(val.Ip[:], ip.To4())
+// 		} else {
+// 			copy(val.Ip[:], ip.To16())
+// 		}
+// 	}
 
-	switch config.FilterTCPFLags {
-	case "SYN":
-		val.TcpFlags = ebpf.BpfTcpFlagsTSYN_FLAG
-	case "SYN-ACK":
-		val.TcpFlags = ebpf.BpfTcpFlagsTSYN_ACK_FLAG
-	case "ACK":
-		val.TcpFlags = ebpf.BpfTcpFlagsTACK_FLAG
-	case "FIN":
-		val.TcpFlags = ebpf.BpfTcpFlagsTFIN_FLAG
-	case "RST":
-		val.TcpFlags = ebpf.BpfTcpFlagsTRST_FLAG
-	case "PUSH":
-		val.TcpFlags = ebpf.BpfTcpFlagsTPSH_FLAG
-	case "URG":
-		val.TcpFlags = ebpf.BpfTcpFlagsTURG_FLAG
-	case "ECE":
-		val.TcpFlags = ebpf.BpfTcpFlagsTECE_FLAG
-	case "CWR":
-		val.TcpFlags = ebpf.BpfTcpFlagsTCWR_FLAG
-	case "FIN-ACK":
-		val.TcpFlags = ebpf.BpfTcpFlagsTFIN_ACK_FLAG
-	case "RST-ACK":
-		val.TcpFlags = ebpf.BpfTcpFlagsTRST_ACK_FLAG
-	}
+// 	switch config.FilterTCPFLags {
+// 	case "SYN":
+// 		val.TcpFlags = ebpf.BpfTcpFlagsTSYN_FLAG
+// 	case "SYN-ACK":
+// 		val.TcpFlags = ebpf.BpfTcpFlagsTSYN_ACK_FLAG
+// 	case "ACK":
+// 		val.TcpFlags = ebpf.BpfTcpFlagsTACK_FLAG
+// 	case "FIN":
+// 		val.TcpFlags = ebpf.BpfTcpFlagsTFIN_FLAG
+// 	case "RST":
+// 		val.TcpFlags = ebpf.BpfTcpFlagsTRST_FLAG
+// 	case "PUSH":
+// 		val.TcpFlags = ebpf.BpfTcpFlagsTPSH_FLAG
+// 	case "URG":
+// 		val.TcpFlags = ebpf.BpfTcpFlagsTURG_FLAG
+// 	case "ECE":
+// 		val.TcpFlags = ebpf.BpfTcpFlagsTECE_FLAG
+// 	case "CWR":
+// 		val.TcpFlags = ebpf.BpfTcpFlagsTCWR_FLAG
+// 	case "FIN-ACK":
+// 		val.TcpFlags = ebpf.BpfTcpFlagsTFIN_ACK_FLAG
+// 	case "RST-ACK":
+// 		val.TcpFlags = ebpf.BpfTcpFlagsTRST_ACK_FLAG
+// 	}
 
-	return val, nil
-}
+// 	return val, nil
+// }
 
 func getSrcPortsRange(config *FilterConfig) (uint16, uint16) {
 	if config.FilterSourcePort.Type == intstr.Int {

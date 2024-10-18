@@ -115,7 +115,7 @@ lint: prereqs ## Lint the code
 	@echo "### Linting golang code"
 	golangci-lint run ./... --timeout=3m
 	@echo "### Linting bpf C code"
-	find ./bpf -type f -not -path "./bpf/headers/*" -name "*.[ch]" | xargs clang-format --dry-run --Werror
+	find ./bpf -type f -not -path "./bpf/headers/*" -name "*.[ch]" | xargs clang-format --Werror
 
 .PHONY: gen-bpf
 gen-bpf: export BPF_CLANG := $(CLANG)

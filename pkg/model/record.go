@@ -45,20 +45,11 @@ type Record struct {
 	TimeFlowStart time.Time
 	TimeFlowEnd   time.Time
 	DNSLatency    time.Duration
-	Interface     string
-	// Duplicate tells whether this flow has another duplicate so it has to be excluded from
-	// any metrics' aggregation (e.g. bytes/second rates between two pods).
-	// The reason for this field is that the same flow can be observed from multiple interfaces,
-	// so the agent needs to choose only a view of the same flow and mark the others as
-	// "exclude from aggregation". Otherwise rates, sums, etc... values would be multiplied by the
-	// number of interfaces this flow is observed from.
-	Duplicate bool
-
+	Interfaces    []string
 	// AgentIP provides information about the source of the flow (the Agent that traced it)
 	AgentIP net.IP
 	// Calculated RTT which is set when record is created by calling NewRecord
 	TimeFlowRtt            time.Duration
-	DupList                []map[string]uint8
 	NetworkMonitorEventsMD []string
 }
 
@@ -85,7 +76,6 @@ func NewRecord(
 	if metrics.DnsRecord.Latency != 0 {
 		record.DNSLatency = time.Duration(metrics.DnsRecord.Latency)
 	}
-	record.DupList = make([]map[string]uint8, 0)
 	record.NetworkMonitorEventsMD = make([]string, 0)
 	return &record
 }
@@ -101,6 +91,22 @@ func Accumulate(r *ebpf.BpfFlowMetrics, src *ebpf.BpfFlowMetrics) {
 	r.Bytes += src.Bytes
 	r.Packets += src.Packets
 	r.Flags |= src.Flags
+	if src.EthProtocol != 0 {
+		r.EthProtocol = src.EthProtocol
+	}
+	// Accumulate interfaces + directions
+	iObs := uint8(0)
+	for r.NbObservations < 4 && iObs < src.NbObservations {
+		r.PktObservations[r.NbObservations] = src.PktObservations[iObs]
+		r.NbObservations++
+		iObs++
+	}
+	if allZero(r.SrcMac) {
+		r.SrcMac = src.SrcMac
+	}
+	if allZero(r.DstMac) {
+		r.DstMac = src.DstMac
+	}
 	// Accumulate Drop statistics
 	r.PktDrops.Bytes += src.PktDrops.Bytes
 	r.PktDrops.Packets += src.PktDrops.Packets
@@ -128,12 +134,12 @@ func Accumulate(r *ebpf.BpfFlowMetrics, src *ebpf.BpfFlowMetrics) {
 		r.Dscp = src.Dscp
 	}
 
-	for _, md := range src.NetworkEvents {
-		if !AllZerosMetaData(md) && !networkEventsMDExist(r.NetworkEvents, md) {
-			copy(r.NetworkEvents[r.NetworkEventsIdx][:], md[:])
-			r.NetworkEventsIdx = (r.NetworkEventsIdx + 1) % maxNetworkEvents
-		}
-	}
+	// for _, md := range src.NetworkEvents {
+	// 	if !AllZerosMetaData(md) && !networkEventsMDExist(r.NetworkEvents, md) {
+	// 		copy(r.NetworkEvents[r.NetworkEventsIdx][:], md[:])
+	// 		r.NetworkEventsIdx = (r.NetworkEventsIdx + 1) % maxNetworkEvents
+	// 	}
+	// }
 }
 
 func networkEventsMDExist(events [maxNetworkEvents][networkEventsMaxEventsMD]uint8, md [networkEventsMaxEventsMD]uint8) bool {
@@ -184,6 +190,15 @@ func ReadFrom(reader io.Reader) (*RawRecord, error) {
 }
 
 func AllZerosMetaData(s [networkEventsMaxEventsMD]uint8) bool {
+	for _, v := range s {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func allZero(s [6]uint8) bool {
 	for _, v := range s {
 		if v != 0 {
 			return false

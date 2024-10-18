@@ -118,7 +118,6 @@ type Flows struct {
 	rbTracer  *flow.RingBufTracer
 	accounter *flow.Accounter
 	limiter   *flow.CapacityLimiter
-	deduper   node.MiddleFunc[[]*model.Record, []*model.Record]
 	exporter  node.TerminalFunc[[]*model.Record]
 
 	// elements used to decorate flows with extra information
@@ -286,10 +285,6 @@ func flowsAgent(cfg *Config, m *metrics.Metrics,
 	rbTracer := flow.NewRingBufTracer(fetcher, mapTracer, cfg.CacheActiveTimeout, m)
 	accounter := flow.NewAccounter(cfg.CacheMaxFlows, cfg.CacheActiveTimeout, time.Now, monotime.Now, m)
 	limiter := flow.NewCapacityLimiter(m)
-	var deduper node.MiddleFunc[[]*model.Record, []*model.Record]
-	if cfg.Deduper == DeduperFirstCome {
-		deduper = flow.Dedupe(cfg.DeduperFCExpiry, cfg.DeduperJustMark, cfg.DeduperMerge, interfaceNamer, m)
-	}
 
 	return &Flows{
 		ebpf:           fetcher,
@@ -301,7 +296,6 @@ func flowsAgent(cfg *Config, m *metrics.Metrics,
 		rbTracer:       rbTracer,
 		accounter:      accounter,
 		limiter:        limiter,
-		deduper:        deduper,
 		agentIP:        agentIP,
 		interfaceNamer: interfaceNamer,
 		promoServer:    promoServer,
@@ -513,15 +507,8 @@ func (f *Flows) buildAndStartPipeline(ctx context.Context) (*node.Terminal[[]*mo
 
 	rbTracer.SendsTo(accounter)
 
-	if f.deduper != nil {
-		deduper := node.AsMiddle(f.deduper, node.ChannelBufferLen(f.cfg.BuffersLength))
-		mapTracer.SendsTo(deduper)
-		accounter.SendsTo(deduper)
-		deduper.SendsTo(limiter)
-	} else {
-		mapTracer.SendsTo(limiter)
-		accounter.SendsTo(limiter)
-	}
+	mapTracer.SendsTo(limiter)
+	accounter.SendsTo(limiter)
 	limiter.SendsTo(decorator)
 	decorator.SendsTo(export)
 

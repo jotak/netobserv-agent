@@ -12,6 +12,7 @@ import (
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/ifaces"
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/kernel"
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 
 	cilium "github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/btf"
@@ -31,27 +32,28 @@ const (
 	qdiscType = "clsact"
 	// ebpf map names as defined in bpf/maps_definition.h
 	aggregatedFlowsMap = "aggregated_flows"
+	pktFlowMap         = "pkt_flow_map"
 	dnsLatencyMap      = "dns_flows"
 	// constants defined in flows.c as "volatile const"
-	constSampling                       = "sampling"
-	constTraceMessages                  = "trace_messages"
-	constEnableRtt                      = "enable_rtt"
-	constEnableDNSTracking              = "enable_dns_tracking"
-	constDNSTrackingPort                = "dns_port"
-	dnsDefaultPort                      = 53
-	constEnableFlowFiltering            = "enable_flows_filtering"
-	constEnableNetworkEventsMonitoring  = "enable_network_events_monitoring"
-	constNetworkEventsMonitoringGroupID = "network_events_monitoring_groupid"
-	pktDropHook                         = "kfree_skb"
-	constPcaEnable                      = "enable_pca"
-	pcaRecordsMap                       = "packet_record"
-	tcEgressFilterName                  = "tc/tc_egress_flow_parse"
-	tcIngressFilterName                 = "tc/tc_ingress_flow_parse"
-	tcpFentryHook                       = "tcp_rcv_fentry"
-	tcpRcvKprobe                        = "tcp_rcv_kprobe"
-	rhNetworkEventsMonitoringHook       = "rh_psample_sample_packet"
-	networkEventsMonitoringHook         = "psample_sample_packet"
-	defaultNetworkEventsGroupID         = 10
+	constSampling          = "sampling"
+	constTraceMessages     = "trace_messages"
+	constEnableRtt         = "enable_rtt"
+	constEnableDNSTracking = "enable_dns_tracking"
+	constDNSTrackingPort   = "dns_port"
+	dnsDefaultPort         = 53
+	// constEnableFlowFiltering = "enable_flows_filtering"
+	// constEnableNetworkEventsMonitoring  = "enable_network_events_monitoring"
+	// constNetworkEventsMonitoringGroupID = "network_events_monitoring_groupid"
+	pktDropHook                   = "kfree_skb"
+	constPcaEnable                = "enable_pca"
+	pcaRecordsMap                 = "packet_record"
+	tcEgressFilterName            = "tc/tc_egress_flow_parse"
+	tcIngressFilterName           = "tc/tc_ingress_flow_parse"
+	tcpFentryHook                 = "tcp_rcv_fentry"
+	tcpRcvKprobe                  = "tcp_rcv_kprobe"
+	rhNetworkEventsMonitoringHook = "rh_psample_sample_packet"
+	networkEventsMonitoringHook   = "psample_sample_packet"
+	defaultNetworkEventsGroupID   = 10
 )
 
 var log = logrus.WithField("component", "ebpf.FlowFetcher")
@@ -134,28 +136,28 @@ func NewFlowFetcher(cfg *FlowFetcherConfig) (*FlowFetcher, error) {
 		spec.Maps[dnsLatencyMap].MaxEntries = 1
 	}
 
-	enableFlowFiltering := 0
-	if cfg.EnableFlowFilter {
-		enableFlowFiltering = 1
-	}
-	enableNetworkEventsMonitoring := 0
-	if cfg.EnableNetworkEventsMonitoring {
-		enableNetworkEventsMonitoring = 1
-	}
-	networkEventsMonitoringGroupID := defaultNetworkEventsGroupID
-	if cfg.NetworkEventsMonitoringGroupID > 0 {
-		networkEventsMonitoringGroupID = cfg.NetworkEventsMonitoringGroupID
-	}
+	// enableFlowFiltering := 0
+	// if cfg.EnableFlowFilter {
+	// 	enableFlowFiltering = 1
+	// }
+	// enableNetworkEventsMonitoring := 0
+	// if cfg.EnableNetworkEventsMonitoring {
+	// 	enableNetworkEventsMonitoring = 1
+	// }
+	// networkEventsMonitoringGroupID := defaultNetworkEventsGroupID
+	// if cfg.NetworkEventsMonitoringGroupID > 0 {
+	// 	networkEventsMonitoringGroupID = cfg.NetworkEventsMonitoringGroupID
+	// }
 
 	if err := spec.RewriteConstants(map[string]interface{}{
-		constSampling:                       uint32(cfg.Sampling),
-		constTraceMessages:                  uint8(traceMsgs),
-		constEnableRtt:                      uint8(enableRtt),
-		constEnableDNSTracking:              uint8(enableDNSTracking),
-		constDNSTrackingPort:                dnsTrackerPort,
-		constEnableFlowFiltering:            uint8(enableFlowFiltering),
-		constEnableNetworkEventsMonitoring:  uint8(enableNetworkEventsMonitoring),
-		constNetworkEventsMonitoringGroupID: uint8(networkEventsMonitoringGroupID),
+		constSampling:          uint32(cfg.Sampling),
+		constTraceMessages:     uint8(traceMsgs),
+		constEnableRtt:         uint8(enableRtt),
+		constEnableDNSTracking: uint8(enableDNSTracking),
+		constDNSTrackingPort:   dnsTrackerPort,
+		// constEnableFlowFiltering: uint8(enableFlowFiltering),
+		// constEnableNetworkEventsMonitoring:  uint8(enableNetworkEventsMonitoring),
+		// constNetworkEventsMonitoringGroupID: uint8(networkEventsMonitoringGroupID),
 	}); err != nil {
 		return nil, fmt.Errorf("rewriting BPF constants definition: %w", err)
 	}
@@ -212,7 +214,7 @@ func NewFlowFetcher(cfg *FlowFetcherConfig) (*FlowFetcher, error) {
 				*/
 			} else {
 				log.Infof("kernel older than 5.16.0 detected: use custom network_events_monitoring hook")
-				networkEventsMonitoringLink, err = link.Kprobe(rhNetworkEventsMonitoringHook, objects.RhNetworkEventsMonitoring, nil)
+				// networkEventsMonitoringLink, err = link.Kprobe(rhNetworkEventsMonitoringHook, objects.RhNetworkEventsMonitoring, nil)
 				if err != nil {
 					return nil, fmt.Errorf("failed to attach the BPF program network events monitoring kprobe: %w", err)
 				}
@@ -231,10 +233,8 @@ func NewFlowFetcher(cfg *FlowFetcherConfig) (*FlowFetcher, error) {
 			if err == nil {
 				goto next
 			}
-			if err != nil {
-				log.Warningf("failed to attach the BPF program to tcpReceiveFentry: %v fallback to use kprobe", err)
-				// Fall through to use kprobe
-			}
+			log.Warningf("failed to attach the BPF program to tcpReceiveFentry: %v fallback to use kprobe", err)
+			// Fall through to use kprobe
 		}
 		// try to use kprobe for older kernels
 		if !rtOldKernel {
@@ -632,9 +632,9 @@ func (m *FlowFetcher) Close() error {
 		if err := m.objects.GlobalCounters.Close(); err != nil {
 			errs = append(errs, err)
 		}
-		if err := m.objects.FilterMap.Close(); err != nil {
-			errs = append(errs, err)
-		}
+		// if err := m.objects.FilterMap.Close(); err != nil {
+		// 	errs = append(errs, err)
+		// }
 		if len(errs) == 0 {
 			m.objects = nil
 		}
@@ -749,6 +749,8 @@ func (m *FlowFetcher) LookupAndDeleteMap(met *metrics.Metrics) map[ebpf.BpfFlowI
 			continue
 		}
 		flows[id] = metrics
+		log.Debugf("flowID: %v", id)
+		log.Debugf("flowMetrics: %v", metrics)
 	}
 	met.BufferSizeGauge.WithBufferName("hashmap-total").Set(float64(count))
 	met.BufferSizeGauge.WithBufferName("hashmap-unique").Set(float64(len(flows)))
@@ -760,33 +762,29 @@ func (m *FlowFetcher) LookupAndDeleteMap(met *metrics.Metrics) map[ebpf.BpfFlowI
 // ReadGlobalCounter reads the global counter and updates drop flows counter metrics
 func (m *FlowFetcher) ReadGlobalCounter(met *metrics.Metrics) {
 	var allCPUValue []uint32
-	reasons := []string{
-		"CannotUpdateHashMapCounter",
-		"FilterRejectCounter",
-		"FilterAcceptCounter",
-		"FilterNoMatchCounter",
-		"NetworkEventsErrorsCounter",
-		"NetworkEventsErrorsGroupIDMismatch",
-		"NetworkEventsErrorsFlowMapUpdate",
-		"NetworkEventsGoodEvent",
+	globalCounters := map[ebpf.BpfGlobalCountersKeyT]prometheus.Counter{
+		ebpf.BpfGlobalCountersKeyTHASHMAP_FLOWS_DROPPED:               met.DroppedFlowsCounter.WithSourceAndReason("flow-fetcher", "CannotUpdateFlowsHashMap"),
+		ebpf.BpfGlobalCountersKeyTHASHMAP_PACKETS_CANT_UPDATE:         met.Errors.WithErrorName("flow-fetcher", "CannotUpdatePacketsHashMap"),
+		ebpf.BpfGlobalCountersKeyTHASHMAP_PACKETS_CANT_DELETE:         met.Errors.WithErrorName("flow-fetcher", "CannotDeletePacketsHashMap"),
+		ebpf.BpfGlobalCountersKeyTFILTER_REJECT:                       met.FilteredFlowsCounter.WithSourceAndReason("flow-filtering", "FilterReject"),
+		ebpf.BpfGlobalCountersKeyTFILTER_ACCEPT:                       met.FilteredFlowsCounter.WithSourceAndReason("flow-filtering", "FilterAccept"),
+		ebpf.BpfGlobalCountersKeyTFILTER_NOMATCH:                      met.FilteredFlowsCounter.WithSourceAndReason("flow-filtering", "FilterNoMatch"),
+		ebpf.BpfGlobalCountersKeyTNETWORK_EVENTS_ERR:                  met.NetworkEventsCounter.WithSourceAndReason("network-events", "NetworkEventsErrors"),
+		ebpf.BpfGlobalCountersKeyTNETWORK_EVENTS_ERR_GROUPID_MISMATCH: met.NetworkEventsCounter.WithSourceAndReason("network-events", "NetworkEventsErrorsGroupIDMismatch"),
+		ebpf.BpfGlobalCountersKeyTNETWORK_EVENTS_ERR_UPDATE_MAP_FLOWS: met.NetworkEventsCounter.WithSourceAndReason("network-events", "NetworkEventsErrorsFlowMapUpdate"),
+		ebpf.BpfGlobalCountersKeyTNETWORK_EVENTS_GOOD:                 met.NetworkEventsCounter.WithSourceAndReason("network-events", "NetworkEventsGoodEvent"),
 	}
 	zeroCounters := make([]uint32, cilium.MustPossibleCPU())
-	for key := ebpf.BpfGlobalCountersKeyTHASHMAP_FLOWS_DROPPED_KEY; key < ebpf.BpfGlobalCountersKeyTMAX_DROPPED_FLOWS_KEY; key++ {
+	for key := ebpf.BpfGlobalCountersKeyT(0); key < ebpf.BpfGlobalCountersKeyTMAX_COUNTERS; key++ {
 		if err := m.objects.GlobalCounters.Lookup(key, &allCPUValue); err != nil {
 			log.WithError(err).Warnf("couldn't read global counter")
 			return
 		}
-		// aggregate all the counters
-		for _, counter := range allCPUValue {
-			if key == ebpf.BpfGlobalCountersKeyTHASHMAP_FLOWS_DROPPED_KEY {
-				met.DroppedFlowsCounter.WithSourceAndReason("flow-fetcher", reasons[key]).Add(float64(counter))
-			} else if key == ebpf.BpfGlobalCountersKeyTNETWORK_EVENTS_ERR_KEY ||
-				key == ebpf.BpfGlobalCountersKeyTNETWORK_EVENTS_ERR_GROUPID_MISMATCH ||
-				key == ebpf.BpfGlobalCountersKeyTNETWORK_EVENTS_ERR_UPDATE_MAP_FLOWS ||
-				key == ebpf.BpfGlobalCountersKeyTNETWORK_EVENTS_GOOD {
-				met.NetworkEventsCounter.WithSourceAndReason("network-events", reasons[key]).Add(float64(counter))
-			} else {
-				met.FilteredFlowsCounter.WithSourceAndReason("flow-filtering", reasons[key]).Add(float64(counter))
+		metric := globalCounters[key]
+		if metric != nil {
+			// aggregate all the counters
+			for _, counter := range allCPUValue {
+				metric.Add(float64(counter))
 			}
 		}
 		// reset the global counter-map entry
@@ -878,25 +876,25 @@ func kernelSpecificLoadAndAssign(oldKernel, rtKernel, supportNetworkEvents bool,
 
 		objects = ebpf.BpfObjects{
 			BpfPrograms: ebpf.BpfPrograms{
-				TcEgressFlowParse:         newObjects.TcEgressFlowParse,
-				TcIngressFlowParse:        newObjects.TcIngressFlowParse,
-				TcxEgressFlowParse:        newObjects.TcxEgressFlowParse,
-				TcxIngressFlowParse:       newObjects.TcxIngressFlowParse,
-				TcEgressPcaParse:          newObjects.TcEgressPcaParse,
-				TcIngressPcaParse:         newObjects.TcIngressPcaParse,
-				TcxEgressPcaParse:         newObjects.TcxEgressPcaParse,
-				TcxIngressPcaParse:        newObjects.TcxIngressPcaParse,
-				TcpRcvKprobe:              nil,
-				TcpRcvFentry:              nil,
-				KfreeSkb:                  nil,
-				RhNetworkEventsMonitoring: nil,
+				TcEgressFlowParse:   newObjects.TcEgressFlowParse,
+				TcIngressFlowParse:  newObjects.TcIngressFlowParse,
+				TcxEgressFlowParse:  newObjects.TcxEgressFlowParse,
+				TcxIngressFlowParse: newObjects.TcxIngressFlowParse,
+				TcEgressPcaParse:    newObjects.TcEgressPcaParse,
+				TcIngressPcaParse:   newObjects.TcIngressPcaParse,
+				TcxEgressPcaParse:   newObjects.TcxEgressPcaParse,
+				TcxIngressPcaParse:  newObjects.TcxIngressPcaParse,
+				TcpRcvKprobe:        nil,
+				TcpRcvFentry:        nil,
+				KfreeSkb:            nil,
+				// RhNetworkEventsMonitoring: nil,
 			},
 			BpfMaps: ebpf.BpfMaps{
 				DirectFlows:     newObjects.DirectFlows,
 				AggregatedFlows: newObjects.AggregatedFlows,
 				DnsFlows:        newObjects.DnsFlows,
-				FilterMap:       newObjects.FilterMap,
-				GlobalCounters:  newObjects.GlobalCounters,
+				// FilterMap:       newObjects.FilterMap,
+				GlobalCounters: newObjects.GlobalCounters,
 			},
 		}
 
@@ -926,25 +924,25 @@ func kernelSpecificLoadAndAssign(oldKernel, rtKernel, supportNetworkEvents bool,
 
 		objects = ebpf.BpfObjects{
 			BpfPrograms: ebpf.BpfPrograms{
-				TcEgressFlowParse:         newObjects.TcEgressFlowParse,
-				TcIngressFlowParse:        newObjects.TcIngressFlowParse,
-				TcxEgressFlowParse:        newObjects.TcxEgressFlowParse,
-				TcxIngressFlowParse:       newObjects.TcxIngressFlowParse,
-				TcEgressPcaParse:          newObjects.TcEgressPcaParse,
-				TcIngressPcaParse:         newObjects.TcIngressPcaParse,
-				TcxEgressPcaParse:         newObjects.TcxEgressPcaParse,
-				TcxIngressPcaParse:        newObjects.TcxIngressPcaParse,
-				TcpRcvKprobe:              newObjects.TCPRcvKprobe,
-				TcpRcvFentry:              nil,
-				KfreeSkb:                  nil,
-				RhNetworkEventsMonitoring: nil,
+				TcEgressFlowParse:   newObjects.TcEgressFlowParse,
+				TcIngressFlowParse:  newObjects.TcIngressFlowParse,
+				TcxEgressFlowParse:  newObjects.TcxEgressFlowParse,
+				TcxIngressFlowParse: newObjects.TcxIngressFlowParse,
+				TcEgressPcaParse:    newObjects.TcEgressPcaParse,
+				TcIngressPcaParse:   newObjects.TcIngressPcaParse,
+				TcxEgressPcaParse:   newObjects.TcxEgressPcaParse,
+				TcxIngressPcaParse:  newObjects.TcxIngressPcaParse,
+				TcpRcvKprobe:        newObjects.TCPRcvKprobe,
+				TcpRcvFentry:        nil,
+				KfreeSkb:            nil,
+				// RhNetworkEventsMonitoring: nil,
 			},
 			BpfMaps: ebpf.BpfMaps{
 				DirectFlows:     newObjects.DirectFlows,
 				AggregatedFlows: newObjects.AggregatedFlows,
 				DnsFlows:        newObjects.DnsFlows,
-				FilterMap:       newObjects.FilterMap,
-				GlobalCounters:  newObjects.GlobalCounters,
+				// FilterMap:       newObjects.FilterMap,
+				GlobalCounters: newObjects.GlobalCounters,
 			},
 		}
 
@@ -974,25 +972,25 @@ func kernelSpecificLoadAndAssign(oldKernel, rtKernel, supportNetworkEvents bool,
 
 		objects = ebpf.BpfObjects{
 			BpfPrograms: ebpf.BpfPrograms{
-				TcEgressFlowParse:         newObjects.TcEgressFlowParse,
-				TcIngressFlowParse:        newObjects.TcIngressFlowParse,
-				TcxEgressFlowParse:        newObjects.TcxEgressFlowParse,
-				TcxIngressFlowParse:       newObjects.TcxIngressFlowParse,
-				TcEgressPcaParse:          newObjects.TcEgressPcaParse,
-				TcIngressPcaParse:         newObjects.TcIngressPcaParse,
-				TcxEgressPcaParse:         newObjects.TcxEgressPcaParse,
-				TcxIngressPcaParse:        newObjects.TcxIngressPcaParse,
-				TcpRcvFentry:              newObjects.TCPRcvFentry,
-				TcpRcvKprobe:              nil,
-				KfreeSkb:                  nil,
-				RhNetworkEventsMonitoring: nil,
+				TcEgressFlowParse:   newObjects.TcEgressFlowParse,
+				TcIngressFlowParse:  newObjects.TcIngressFlowParse,
+				TcxEgressFlowParse:  newObjects.TcxEgressFlowParse,
+				TcxIngressFlowParse: newObjects.TcxIngressFlowParse,
+				TcEgressPcaParse:    newObjects.TcEgressPcaParse,
+				TcIngressPcaParse:   newObjects.TcIngressPcaParse,
+				TcxEgressPcaParse:   newObjects.TcxEgressPcaParse,
+				TcxIngressPcaParse:  newObjects.TcxIngressPcaParse,
+				TcpRcvFentry:        newObjects.TCPRcvFentry,
+				TcpRcvKprobe:        nil,
+				KfreeSkb:            nil,
+				// RhNetworkEventsMonitoring: nil,
 			},
 			BpfMaps: ebpf.BpfMaps{
 				DirectFlows:     newObjects.DirectFlows,
 				AggregatedFlows: newObjects.AggregatedFlows,
 				DnsFlows:        newObjects.DnsFlows,
-				FilterMap:       newObjects.FilterMap,
-				GlobalCounters:  newObjects.GlobalCounters,
+				// FilterMap:       newObjects.FilterMap,
+				GlobalCounters: newObjects.GlobalCounters,
 			},
 		}
 
@@ -1023,25 +1021,25 @@ func kernelSpecificLoadAndAssign(oldKernel, rtKernel, supportNetworkEvents bool,
 
 		objects = ebpf.BpfObjects{
 			BpfPrograms: ebpf.BpfPrograms{
-				TcEgressFlowParse:         newObjects.TcEgressFlowParse,
-				TcIngressFlowParse:        newObjects.TcIngressFlowParse,
-				TcxEgressFlowParse:        newObjects.TcxEgressFlowParse,
-				TcxIngressFlowParse:       newObjects.TcxIngressFlowParse,
-				TcEgressPcaParse:          newObjects.TcEgressPcaParse,
-				TcIngressPcaParse:         newObjects.TcIngressPcaParse,
-				TcxEgressPcaParse:         newObjects.TcxEgressPcaParse,
-				TcxIngressPcaParse:        newObjects.TcxIngressPcaParse,
-				TcpRcvFentry:              newObjects.TCPRcvFentry,
-				TcpRcvKprobe:              newObjects.TCPRcvKprobe,
-				KfreeSkb:                  newObjects.KfreeSkb,
-				RhNetworkEventsMonitoring: nil,
+				TcEgressFlowParse:   newObjects.TcEgressFlowParse,
+				TcIngressFlowParse:  newObjects.TcIngressFlowParse,
+				TcxEgressFlowParse:  newObjects.TcxEgressFlowParse,
+				TcxIngressFlowParse: newObjects.TcxIngressFlowParse,
+				TcEgressPcaParse:    newObjects.TcEgressPcaParse,
+				TcIngressPcaParse:   newObjects.TcIngressPcaParse,
+				TcxEgressPcaParse:   newObjects.TcxEgressPcaParse,
+				TcxIngressPcaParse:  newObjects.TcxIngressPcaParse,
+				TcpRcvFentry:        newObjects.TCPRcvFentry,
+				TcpRcvKprobe:        newObjects.TCPRcvKprobe,
+				KfreeSkb:            newObjects.KfreeSkb,
+				// RhNetworkEventsMonitoring: nil,
 			},
 			BpfMaps: ebpf.BpfMaps{
 				DirectFlows:     newObjects.DirectFlows,
 				AggregatedFlows: newObjects.AggregatedFlows,
 				DnsFlows:        newObjects.DnsFlows,
-				FilterMap:       newObjects.FilterMap,
-				GlobalCounters:  newObjects.GlobalCounters,
+				// FilterMap:       newObjects.FilterMap,
+				GlobalCounters: newObjects.GlobalCounters,
 			},
 		}
 
@@ -1111,14 +1109,15 @@ func NewPacketFetcher(cfg *FlowFetcherConfig) (*PacketFetcher, error) {
 	delete(spec.Programs, tcpRcvKprobe)
 	delete(spec.Programs, tcpFentryHook)
 	delete(spec.Programs, aggregatedFlowsMap)
+	delete(spec.Programs, pktFlowMap)
 	delete(spec.Programs, constSampling)
 	delete(spec.Programs, constTraceMessages)
 	delete(spec.Programs, constEnableDNSTracking)
 	delete(spec.Programs, constDNSTrackingPort)
 	delete(spec.Programs, constEnableRtt)
-	delete(spec.Programs, constEnableFlowFiltering)
-	delete(spec.Programs, constEnableNetworkEventsMonitoring)
-	delete(spec.Programs, constNetworkEventsMonitoringGroupID)
+	// delete(spec.Programs, constEnableFlowFiltering)
+	// delete(spec.Programs, constEnableNetworkEventsMonitoring)
+	// delete(spec.Programs, constNetworkEventsMonitoringGroupID)
 
 	if err := spec.LoadAndAssign(&newObjects, nil); err != nil {
 		var ve *cilium.VerifierError
@@ -1132,22 +1131,22 @@ func NewPacketFetcher(cfg *FlowFetcherConfig) (*PacketFetcher, error) {
 
 	objects = ebpf.BpfObjects{
 		BpfPrograms: ebpf.BpfPrograms{
-			TcEgressPcaParse:          newObjects.TcEgressPcaParse,
-			TcIngressPcaParse:         newObjects.TcIngressPcaParse,
-			TcxEgressPcaParse:         newObjects.TcxEgressPcaParse,
-			TcxIngressPcaParse:        newObjects.TcxIngressPcaParse,
-			TcEgressFlowParse:         nil,
-			TcIngressFlowParse:        nil,
-			TcxEgressFlowParse:        nil,
-			TcxIngressFlowParse:       nil,
-			TcpRcvFentry:              nil,
-			TcpRcvKprobe:              nil,
-			KfreeSkb:                  nil,
-			RhNetworkEventsMonitoring: nil,
+			TcEgressPcaParse:    newObjects.TcEgressPcaParse,
+			TcIngressPcaParse:   newObjects.TcIngressPcaParse,
+			TcxEgressPcaParse:   newObjects.TcxEgressPcaParse,
+			TcxIngressPcaParse:  newObjects.TcxIngressPcaParse,
+			TcEgressFlowParse:   nil,
+			TcIngressFlowParse:  nil,
+			TcxEgressFlowParse:  nil,
+			TcxIngressFlowParse: nil,
+			TcpRcvFentry:        nil,
+			TcpRcvKprobe:        nil,
+			KfreeSkb:            nil,
+			// RhNetworkEventsMonitoring: nil,
 		},
 		BpfMaps: ebpf.BpfMaps{
 			PacketRecord: newObjects.PacketRecord,
-			FilterMap:    newObjects.FilterMap,
+			// FilterMap:    newObjects.FilterMap,
 		},
 	}
 

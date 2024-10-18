@@ -19,7 +19,9 @@ var protoLog = logrus.WithField("component", "pbflow")
 func FlowsToPB(inputRecords []*model.Record, maxLen int, s *ovnobserv.SampleDecoder) []*Records {
 	entries := make([]*Record, 0, len(inputRecords))
 	for _, record := range inputRecords {
-		entries = append(entries, FlowToPB(record, s))
+		enc := FlowToPB(record, s)
+		protoLog.Debugf("proto encoded: %v\n", enc)
+		entries = append(entries, enc)
 	}
 	var records []*Records
 	for len(entries) > 0 {
@@ -37,11 +39,10 @@ func FlowsToPB(inputRecords []*model.Record, maxLen int, s *ovnobserv.SampleDeco
 // into a protobuf-encoded message ready to be sent to the collector via kafka
 func FlowToPB(fr *model.Record, s *ovnobserv.SampleDecoder) *Record {
 	var pbflowRecord = Record{
-		EthProtocol: uint32(fr.Id.EthProtocol),
-		Direction:   Direction(fr.Id.Direction),
+		EthProtocol: uint32(fr.Metrics.EthProtocol),
 		DataLink: &DataLink{
-			SrcMac: macToUint64(&fr.Id.SrcMac),
-			DstMac: macToUint64(&fr.Id.DstMac),
+			SrcMac: macToUint64(&fr.Metrics.SrcMac),
+			DstMac: macToUint64(&fr.Metrics.DstMac),
 		},
 		Network: &Network{
 			Dscp: uint32(fr.Metrics.Dscp),
@@ -63,10 +64,8 @@ func FlowToPB(fr *model.Record, s *ovnobserv.SampleDecoder) *Record {
 			Nanos:   int32(fr.TimeFlowEnd.Nanosecond()),
 		},
 		Packets:                uint64(fr.Metrics.Packets),
-		Duplicate:              fr.Duplicate,
 		AgentIp:                agentIP(fr.AgentIP),
 		Flags:                  uint32(fr.Metrics.Flags),
-		Interface:              fr.Interface,
 		PktDropBytes:           fr.Metrics.PktDrops.Bytes,
 		PktDropPackets:         uint64(fr.Metrics.PktDrops.Packets),
 		PktDropLatestFlags:     uint32(fr.Metrics.PktDrops.LatestFlags),
@@ -80,40 +79,43 @@ func FlowToPB(fr *model.Record, s *ovnobserv.SampleDecoder) *Record {
 	if fr.Metrics.DnsRecord.Latency != 0 {
 		pbflowRecord.DnsLatency = durationpb.New(fr.DNSLatency)
 	}
-	if len(fr.DupList) != 0 {
+	if fr.Metrics.NbObservations > 0 {
 		pbflowRecord.DupList = make([]*DupMapEntry, 0)
-		for _, m := range fr.DupList {
-			for key, value := range m {
-				pbflowRecord.DupList = append(pbflowRecord.DupList, &DupMapEntry{
-					Interface: key,
-					Direction: Direction(value),
-				})
+		for i := 0; i < int(fr.Metrics.NbObservations); i++ {
+			o := fr.Metrics.PktObservations[i]
+			var intf string
+			if i < len(fr.Interfaces) {
+				intf = fr.Interfaces[i]
 			}
+			pbflowRecord.DupList = append(pbflowRecord.DupList, &DupMapEntry{
+				Interface: intf,
+				Direction: Direction(o.Direction),
+			})
 		}
 	}
-	if fr.Id.EthProtocol == model.IPv6Type {
+	if fr.Metrics.EthProtocol == model.IPv6Type {
 		pbflowRecord.Network.SrcAddr = &IP{IpFamily: &IP_Ipv6{Ipv6: fr.Id.SrcIp[:]}}
 		pbflowRecord.Network.DstAddr = &IP{IpFamily: &IP_Ipv6{Ipv6: fr.Id.DstIp[:]}}
 	} else {
 		pbflowRecord.Network.SrcAddr = &IP{IpFamily: &IP_Ipv4{Ipv4: model.IntEncodeV4(fr.Id.SrcIp)}}
 		pbflowRecord.Network.DstAddr = &IP{IpFamily: &IP_Ipv4{Ipv4: model.IntEncodeV4(fr.Id.DstIp)}}
 	}
-	if s != nil {
-		seen := make(map[string]bool)
-		for _, metadata := range fr.Metrics.NetworkEvents {
-			if !model.AllZerosMetaData(metadata) {
-				if md, err := s.DecodeCookie8Bytes(metadata); err == nil {
-					protoLog.Debugf("Network Events Metadata %v decoded Cookie: %v", metadata, md)
-					if !seen[md] {
-						pbflowRecord.NetworkEventsMetadata = append(pbflowRecord.NetworkEventsMetadata, md)
-						seen[md] = true
-					}
-				} else {
-					protoLog.Errorf("unable to decode Network events cookie: %v", err)
-				}
-			}
-		}
-	}
+	// if s != nil {
+	// 	seen := make(map[string]bool)
+	// 	for _, metadata := range fr.Metrics.NetworkEvents {
+	// 		if !model.AllZerosMetaData(metadata) {
+	// 			if md, err := s.DecodeCookie8Bytes(metadata); err == nil {
+	// 				protoLog.Debugf("Network Events Metadata %v decoded Cookie: %v", metadata, md)
+	// 				if !seen[md] {
+	// 					pbflowRecord.NetworkEventsMetadata = append(pbflowRecord.NetworkEventsMetadata, md)
+	// 					seen[md] = true
+	// 				}
+	// 			} else {
+	// 				protoLog.Errorf("unable to decode Network events cookie: %v", err)
+	// 			}
+	// 		}
+	// 	}
+	// }
 	return &pbflowRecord
 }
 
@@ -124,11 +126,7 @@ func PBToFlow(pb *Record) *model.Record {
 	out := model.Record{
 		RawRecord: model.RawRecord{
 			Id: ebpf.BpfFlowId{
-				Direction:         uint8(pb.Direction),
-				EthProtocol:       uint16(pb.EthProtocol),
 				TransportProtocol: uint8(pb.Transport.Protocol),
-				SrcMac:            macToUint8(pb.DataLink.GetSrcMac()),
-				DstMac:            macToUint8(pb.DataLink.GetDstMac()),
 				SrcIp:             ipToIPAddr(pb.Network.GetSrcAddr()),
 				DstIp:             ipToIPAddr(pb.Network.GetDstAddr()),
 				SrcPort:           uint16(pb.Transport.SrcPort),
@@ -137,10 +135,13 @@ func PBToFlow(pb *Record) *model.Record {
 				IcmpCode:          uint8(pb.IcmpCode),
 			},
 			Metrics: ebpf.BpfFlowMetrics{
-				Bytes:   pb.Bytes,
-				Packets: uint32(pb.Packets),
-				Flags:   uint16(pb.Flags),
-				Dscp:    uint8(pb.Network.Dscp),
+				EthProtocol: uint16(pb.EthProtocol),
+				SrcMac:      macToUint8(pb.DataLink.GetSrcMac()),
+				DstMac:      macToUint8(pb.DataLink.GetDstMac()),
+				Bytes:       pb.Bytes,
+				Packets:     uint32(pb.Packets),
+				Flags:       uint16(pb.Flags),
+				Dscp:        uint8(pb.Network.Dscp),
 				PktDrops: ebpf.BpfPktDropsT{
 					Bytes:           pb.PktDropBytes,
 					Packets:         uint32(pb.PktDropPackets),
@@ -159,18 +160,16 @@ func PBToFlow(pb *Record) *model.Record {
 		TimeFlowStart: pb.TimeFlowStart.AsTime(),
 		TimeFlowEnd:   pb.TimeFlowEnd.AsTime(),
 		AgentIP:       pbIPToNetIP(pb.AgentIp),
-		Duplicate:     pb.Duplicate,
-		Interface:     pb.Interface,
 		TimeFlowRtt:   pb.TimeFlowRtt.AsDuration(),
 		DNSLatency:    pb.DnsLatency.AsDuration(),
 	}
 
-	if len(pb.GetDupList()) != 0 {
-		for _, entry := range pb.GetDupList() {
-			intf := entry.Interface
-			dir := uint8(entry.Direction)
-			out.DupList = append(out.DupList, map[string]uint8{intf: dir})
-		}
+	out.Metrics.NbObservations = uint8(len(pb.GetDupList()))
+	for i, entry := range pb.GetDupList() {
+		intf := entry.Interface
+		dir := uint8(entry.Direction)
+		out.Metrics.PktObservations[i] = ebpf.BpfPktObservationT{Direction: dir}
+		out.Interfaces = append(out.Interfaces, intf)
 	}
 	if len(pb.GetNetworkEventsMetadata()) != 0 {
 		out.NetworkMonitorEventsMD = append(out.NetworkMonitorEventsMD, pb.GetNetworkEventsMetadata()...)

@@ -9,6 +9,16 @@ struct {
     __uint(max_entries, 1 << 24);
 } direct_flows SEC(".maps");
 
+// Key: the packet identifier. Value: the flow id.
+struct {
+    // __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __type(key, pkt_id);
+    __type(value, flow_id);
+    __uint(max_entries, 1 << 20);
+    // __uint(map_flags, BPF_F_NO_PREALLOC);
+} pkt_flow_map SEC(".maps");
+
 // Key: the flow identifier. Value: the flow metrics for that identifier.
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
@@ -41,7 +51,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __type(key, u32);
     __type(value, u32);
-    __uint(max_entries, MAX_DROPPED_FLOWS_KEY);
+    __uint(max_entries, MAX_COUNTERS);
 } global_counters SEC(".maps");
 
 // LPM trie map used to filter traffic by IP address CIDR and direction

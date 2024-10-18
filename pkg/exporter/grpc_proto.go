@@ -3,6 +3,7 @@ package exporter
 import (
 	"context"
 
+	"github.com/netobserv/netobserv-ebpf-agent/pkg/decode"
 	grpc "github.com/netobserv/netobserv-ebpf-agent/pkg/grpc/flow"
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/metrics"
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/model"
@@ -65,6 +66,10 @@ func (g *GRPCProto) ExportFlows(input <-chan []*model.Record) {
 			}
 			g.batchCounter.Inc()
 			g.metrics.EvictedFlowsCounter.WithSource(componentGRPC).Add(float64(len(pbRecords.Entries)))
+			for _, r := range pbRecords.GetEntries() {
+				decoded := decode.PBFlowToMap(r)
+				log.Debugf("proto decoded: %v\n", decoded)
+			}
 		}
 	}
 	if err := g.clientConn.Close(); err != nil {

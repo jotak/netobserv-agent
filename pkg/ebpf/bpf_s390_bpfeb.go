@@ -36,14 +36,6 @@ type BpfDnsRecordT struct {
 	Errno   uint8
 }
 
-type BpfFilterActionT uint32
-
-const (
-	BpfFilterActionTACCEPT             BpfFilterActionT = 0
-	BpfFilterActionTREJECT             BpfFilterActionT = 1
-	BpfFilterActionTMAX_FILTER_ACTIONS BpfFilterActionT = 2
-)
-
 type BpfFilterKeyT struct {
 	PrefixLen uint32
 	IpData    [16]uint8
@@ -66,7 +58,7 @@ type BpfFilterValueT struct {
 	IcmpType     uint8
 	IcmpCode     uint8
 	Direction    BpfDirectionT
-	Action       BpfFilterActionT
+	Action       uint32
 	TcpFlags     BpfTcpFlagsT
 	Ip           [16]uint8
 }
@@ -74,10 +66,6 @@ type BpfFilterValueT struct {
 type BpfFlowId BpfFlowIdT
 
 type BpfFlowIdT struct {
-	EthProtocol       uint16
-	Direction         uint8
-	SrcMac            [6]uint8
-	DstMac            [6]uint8
 	SrcIp             [16]uint8
 	DstIp             [16]uint8
 	SrcPort           uint16
@@ -85,24 +73,26 @@ type BpfFlowIdT struct {
 	TransportProtocol uint8
 	IcmpType          uint8
 	IcmpCode          uint8
-	IfIndex           uint32
 }
 
 type BpfFlowMetrics BpfFlowMetricsT
 
 type BpfFlowMetricsT struct {
-	Packets          uint32
-	Bytes            uint64
-	StartMonoTimeTs  uint64
-	EndMonoTimeTs    uint64
-	Flags            uint16
-	Errno            uint8
-	Dscp             uint8
-	PktDrops         BpfPktDropsT
-	DnsRecord        BpfDnsRecordT
-	FlowRtt          uint64
-	NetworkEventsIdx uint8
-	NetworkEvents    [4][8]uint8
+	EthProtocol     uint16
+	PktObservations [4]BpfPktObservationT
+	NbObservations  uint8
+	SrcMac          [6]uint8
+	DstMac          [6]uint8
+	Packets         uint32
+	Bytes           uint64
+	StartMonoTimeTs uint64
+	EndMonoTimeTs   uint64
+	Flags           uint16
+	Errno           uint8
+	Dscp            uint8
+	PktDrops        BpfPktDropsT
+	DnsRecord       BpfDnsRecordT
+	FlowRtt         uint64
 }
 
 type BpfFlowRecordT struct {
@@ -113,15 +103,17 @@ type BpfFlowRecordT struct {
 type BpfGlobalCountersKeyT uint32
 
 const (
-	BpfGlobalCountersKeyTHASHMAP_FLOWS_DROPPED_KEY           BpfGlobalCountersKeyT = 0
-	BpfGlobalCountersKeyTFILTER_REJECT_KEY                   BpfGlobalCountersKeyT = 1
-	BpfGlobalCountersKeyTFILTER_ACCEPT_KEY                   BpfGlobalCountersKeyT = 2
-	BpfGlobalCountersKeyTFILTER_NOMATCH_KEY                  BpfGlobalCountersKeyT = 3
-	BpfGlobalCountersKeyTNETWORK_EVENTS_ERR_KEY              BpfGlobalCountersKeyT = 4
-	BpfGlobalCountersKeyTNETWORK_EVENTS_ERR_GROUPID_MISMATCH BpfGlobalCountersKeyT = 5
-	BpfGlobalCountersKeyTNETWORK_EVENTS_ERR_UPDATE_MAP_FLOWS BpfGlobalCountersKeyT = 6
-	BpfGlobalCountersKeyTNETWORK_EVENTS_GOOD                 BpfGlobalCountersKeyT = 7
-	BpfGlobalCountersKeyTMAX_DROPPED_FLOWS_KEY               BpfGlobalCountersKeyT = 8
+	BpfGlobalCountersKeyTHASHMAP_FLOWS_DROPPED               BpfGlobalCountersKeyT = 0
+	BpfGlobalCountersKeyTHASHMAP_PACKETS_CANT_UPDATE         BpfGlobalCountersKeyT = 1
+	BpfGlobalCountersKeyTHASHMAP_PACKETS_CANT_DELETE         BpfGlobalCountersKeyT = 2
+	BpfGlobalCountersKeyTFILTER_REJECT                       BpfGlobalCountersKeyT = 3
+	BpfGlobalCountersKeyTFILTER_ACCEPT                       BpfGlobalCountersKeyT = 4
+	BpfGlobalCountersKeyTFILTER_NOMATCH                      BpfGlobalCountersKeyT = 5
+	BpfGlobalCountersKeyTNETWORK_EVENTS_ERR                  BpfGlobalCountersKeyT = 6
+	BpfGlobalCountersKeyTNETWORK_EVENTS_ERR_GROUPID_MISMATCH BpfGlobalCountersKeyT = 7
+	BpfGlobalCountersKeyTNETWORK_EVENTS_ERR_UPDATE_MAP_FLOWS BpfGlobalCountersKeyT = 8
+	BpfGlobalCountersKeyTNETWORK_EVENTS_GOOD                 BpfGlobalCountersKeyT = 9
+	BpfGlobalCountersKeyTMAX_COUNTERS                        BpfGlobalCountersKeyT = 10
 )
 
 type BpfPktDropsT struct {
@@ -130,6 +122,17 @@ type BpfPktDropsT struct {
 	LatestFlags     uint16
 	LatestState     uint8
 	LatestDropCause uint32
+}
+
+type BpfPktId struct {
+	SkbPtr uint64
+	Hash   uint32
+	Tstamp uint64
+}
+
+type BpfPktObservationT struct {
+	Direction uint8
+	IfIndex   uint32
 }
 
 type BpfTcpFlagsT uint32
@@ -189,18 +192,17 @@ type BpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type BpfProgramSpecs struct {
-	KfreeSkb                  *ebpf.ProgramSpec `ebpf:"kfree_skb"`
-	RhNetworkEventsMonitoring *ebpf.ProgramSpec `ebpf:"rh_network_events_monitoring"`
-	TcEgressFlowParse         *ebpf.ProgramSpec `ebpf:"tc_egress_flow_parse"`
-	TcEgressPcaParse          *ebpf.ProgramSpec `ebpf:"tc_egress_pca_parse"`
-	TcIngressFlowParse        *ebpf.ProgramSpec `ebpf:"tc_ingress_flow_parse"`
-	TcIngressPcaParse         *ebpf.ProgramSpec `ebpf:"tc_ingress_pca_parse"`
-	TcpRcvFentry              *ebpf.ProgramSpec `ebpf:"tcp_rcv_fentry"`
-	TcpRcvKprobe              *ebpf.ProgramSpec `ebpf:"tcp_rcv_kprobe"`
-	TcxEgressFlowParse        *ebpf.ProgramSpec `ebpf:"tcx_egress_flow_parse"`
-	TcxEgressPcaParse         *ebpf.ProgramSpec `ebpf:"tcx_egress_pca_parse"`
-	TcxIngressFlowParse       *ebpf.ProgramSpec `ebpf:"tcx_ingress_flow_parse"`
-	TcxIngressPcaParse        *ebpf.ProgramSpec `ebpf:"tcx_ingress_pca_parse"`
+	KfreeSkb            *ebpf.ProgramSpec `ebpf:"kfree_skb"`
+	TcEgressFlowParse   *ebpf.ProgramSpec `ebpf:"tc_egress_flow_parse"`
+	TcEgressPcaParse    *ebpf.ProgramSpec `ebpf:"tc_egress_pca_parse"`
+	TcIngressFlowParse  *ebpf.ProgramSpec `ebpf:"tc_ingress_flow_parse"`
+	TcIngressPcaParse   *ebpf.ProgramSpec `ebpf:"tc_ingress_pca_parse"`
+	TcpRcvFentry        *ebpf.ProgramSpec `ebpf:"tcp_rcv_fentry"`
+	TcpRcvKprobe        *ebpf.ProgramSpec `ebpf:"tcp_rcv_kprobe"`
+	TcxEgressFlowParse  *ebpf.ProgramSpec `ebpf:"tcx_egress_flow_parse"`
+	TcxEgressPcaParse   *ebpf.ProgramSpec `ebpf:"tcx_egress_pca_parse"`
+	TcxIngressFlowParse *ebpf.ProgramSpec `ebpf:"tcx_ingress_flow_parse"`
+	TcxIngressPcaParse  *ebpf.ProgramSpec `ebpf:"tcx_ingress_pca_parse"`
 }
 
 // BpfMapSpecs contains maps before they are loaded into the kernel.
@@ -213,6 +215,7 @@ type BpfMapSpecs struct {
 	FilterMap       *ebpf.MapSpec `ebpf:"filter_map"`
 	GlobalCounters  *ebpf.MapSpec `ebpf:"global_counters"`
 	PacketRecord    *ebpf.MapSpec `ebpf:"packet_record"`
+	PktFlowMap      *ebpf.MapSpec `ebpf:"pkt_flow_map"`
 }
 
 // BpfObjects contains all objects after they have been loaded into the kernel.
@@ -240,6 +243,7 @@ type BpfMaps struct {
 	FilterMap       *ebpf.Map `ebpf:"filter_map"`
 	GlobalCounters  *ebpf.Map `ebpf:"global_counters"`
 	PacketRecord    *ebpf.Map `ebpf:"packet_record"`
+	PktFlowMap      *ebpf.Map `ebpf:"pkt_flow_map"`
 }
 
 func (m *BpfMaps) Close() error {
@@ -250,6 +254,7 @@ func (m *BpfMaps) Close() error {
 		m.FilterMap,
 		m.GlobalCounters,
 		m.PacketRecord,
+		m.PktFlowMap,
 	)
 }
 
@@ -257,24 +262,22 @@ func (m *BpfMaps) Close() error {
 //
 // It can be passed to LoadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type BpfPrograms struct {
-	KfreeSkb                  *ebpf.Program `ebpf:"kfree_skb"`
-	RhNetworkEventsMonitoring *ebpf.Program `ebpf:"rh_network_events_monitoring"`
-	TcEgressFlowParse         *ebpf.Program `ebpf:"tc_egress_flow_parse"`
-	TcEgressPcaParse          *ebpf.Program `ebpf:"tc_egress_pca_parse"`
-	TcIngressFlowParse        *ebpf.Program `ebpf:"tc_ingress_flow_parse"`
-	TcIngressPcaParse         *ebpf.Program `ebpf:"tc_ingress_pca_parse"`
-	TcpRcvFentry              *ebpf.Program `ebpf:"tcp_rcv_fentry"`
-	TcpRcvKprobe              *ebpf.Program `ebpf:"tcp_rcv_kprobe"`
-	TcxEgressFlowParse        *ebpf.Program `ebpf:"tcx_egress_flow_parse"`
-	TcxEgressPcaParse         *ebpf.Program `ebpf:"tcx_egress_pca_parse"`
-	TcxIngressFlowParse       *ebpf.Program `ebpf:"tcx_ingress_flow_parse"`
-	TcxIngressPcaParse        *ebpf.Program `ebpf:"tcx_ingress_pca_parse"`
+	KfreeSkb            *ebpf.Program `ebpf:"kfree_skb"`
+	TcEgressFlowParse   *ebpf.Program `ebpf:"tc_egress_flow_parse"`
+	TcEgressPcaParse    *ebpf.Program `ebpf:"tc_egress_pca_parse"`
+	TcIngressFlowParse  *ebpf.Program `ebpf:"tc_ingress_flow_parse"`
+	TcIngressPcaParse   *ebpf.Program `ebpf:"tc_ingress_pca_parse"`
+	TcpRcvFentry        *ebpf.Program `ebpf:"tcp_rcv_fentry"`
+	TcpRcvKprobe        *ebpf.Program `ebpf:"tcp_rcv_kprobe"`
+	TcxEgressFlowParse  *ebpf.Program `ebpf:"tcx_egress_flow_parse"`
+	TcxEgressPcaParse   *ebpf.Program `ebpf:"tcx_egress_pca_parse"`
+	TcxIngressFlowParse *ebpf.Program `ebpf:"tcx_ingress_flow_parse"`
+	TcxIngressPcaParse  *ebpf.Program `ebpf:"tcx_ingress_pca_parse"`
 }
 
 func (p *BpfPrograms) Close() error {
 	return _BpfClose(
 		p.KfreeSkb,
-		p.RhNetworkEventsMonitoring,
 		p.TcEgressFlowParse,
 		p.TcEgressPcaParse,
 		p.TcIngressFlowParse,

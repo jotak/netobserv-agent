@@ -55,20 +55,16 @@ func RecordToMap(fr *model.Record) config.GenericMap {
 	if fr == nil {
 		return config.GenericMap{}
 	}
-	srcMAC := model.MacAddr(fr.Id.SrcMac)
-	dstMAC := model.MacAddr(fr.Id.DstMac)
+	srcMAC := model.MacAddr(fr.Metrics.SrcMac)
+	dstMAC := model.MacAddr(fr.Metrics.DstMac)
 	out := config.GenericMap{
 		"SrcMac":          srcMAC.String(),
 		"DstMac":          dstMAC.String(),
-		"Etype":           fr.Id.EthProtocol,
+		"Etype":           fr.Metrics.EthProtocol,
 		"TimeFlowStartMs": fr.TimeFlowStart.UnixMilli(),
 		"TimeFlowEndMs":   fr.TimeFlowEnd.UnixMilli(),
 		"TimeReceived":    time.Now().Unix(),
 		"AgentIP":         fr.AgentIP.String(),
-	}
-
-	if fr.Duplicate {
-		out["Duplicate"] = true
 	}
 
 	if fr.Metrics.Bytes != 0 {
@@ -79,23 +75,14 @@ func RecordToMap(fr *model.Record) config.GenericMap {
 		out["Packets"] = fr.Metrics.Packets
 	}
 
-	var interfaces []string
-	var directions []int
-	if len(fr.DupList) != 0 {
-		for _, m := range fr.DupList {
-			for key, value := range m {
-				interfaces = append(interfaces, key)
-				directions = append(directions, int(model.Direction(value)))
-			}
-		}
-	} else {
-		interfaces = append(interfaces, fr.Interface)
-		directions = append(directions, int(fr.Id.Direction))
+	var directions []uint8
+	for i := uint8(0); i < fr.Metrics.NbObservations; i++ {
+		directions = append(directions, fr.Metrics.PktObservations[i].Direction)
 	}
-	out["Interfaces"] = interfaces
+	out["Interfaces"] = fr.Interfaces
 	out["IfDirections"] = directions
 
-	if fr.Id.EthProtocol == uint16(ethernet.EtherTypeIPv4) || fr.Id.EthProtocol == uint16(ethernet.EtherTypeIPv6) {
+	if fr.Metrics.EthProtocol == uint16(ethernet.EtherTypeIPv4) || fr.Metrics.EthProtocol == uint16(ethernet.EtherTypeIPv6) {
 		out["SrcAddr"] = model.IP(fr.Id.SrcIp).String()
 		out["DstAddr"] = model.IP(fr.Id.DstIp).String()
 		out["Proto"] = fr.Id.TransportProtocol
