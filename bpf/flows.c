@@ -51,6 +51,11 @@
  */
 #include "network_events_monitoring.h"
 
+/*
+ * De-duplication logic
+ */
+#include "dedup.h"
+
 static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
     // If sampling is defined, will only parse 1 out of "sampling" flows
     if (sampling > 1 && (bpf_get_prandom_u32() % sampling) != 0) {
@@ -58,11 +63,13 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
         return TC_ACT_OK;
     }
     do_sampling = 1;
-    pkt_info pkt;
-    __builtin_memset(&pkt, 0, sizeof(pkt));
 
+    // Create new flow
     flow_id id;
     __builtin_memset(&id, 0, sizeof(id));
+
+    pkt_info pkt;
+    __builtin_memset(&pkt, 0, sizeof(pkt));
 
     pkt.current_ts = bpf_ktime_get_ns(); // Record the current time first.
     pkt.id = &id;
@@ -75,14 +82,23 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
         return TC_ACT_OK;
     }
 
-    //Set extra fields
-    id.if_index = skb->ifindex;
-    id.direction = direction;
-
     // check if this packet need to be filtered if filtering feature is enabled
-    bool skip = check_and_do_flow_filtering(&id, pkt.flags, 0);
+    bool skip = check_and_do_flow_filtering(&pkt, 0);
     if (skip) {
         return TC_ACT_OK;
+    }
+
+    u32 packets = 1;
+    u64 bytes = skb->len;
+
+    int dedup = check_dup(skb, direction, &pkt);
+    if (dedup == 0) {
+        return TC_ACT_OK;
+    }
+    if (dedup == 2) {
+        // Do not increase flow counters
+        packets = 0;
+        bytes = 0;
     }
 
     int dns_errno = 0;
@@ -93,8 +109,8 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
     // a spinlocked alternative version and use it selectively https://lwn.net/Articles/779120/
     flow_metrics *aggregate_flow = (flow_metrics *)bpf_map_lookup_elem(&aggregated_flows, &id);
     if (aggregate_flow != NULL) {
-        aggregate_flow->packets += 1;
-        aggregate_flow->bytes += skb->len;
+        aggregate_flow->packets += packets;
+        aggregate_flow->bytes += bytes;
         aggregate_flow->end_mono_time_ts = pkt.current_ts;
         // it might happen that start_mono_time hasn't been set due to
         // the way percpu hashmap deal with concurrent map entries
@@ -107,6 +123,8 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
         aggregate_flow->dns_record.flags = pkt.dns_flags;
         aggregate_flow->dns_record.latency = pkt.dns_latency;
         aggregate_flow->dns_record.errno = dns_errno;
+        // No additional IP here since we found the flow from this current 5-tuples, so it's already there
+        add_observation(aggregate_flow, skb->ifindex, direction, NULL, NULL);
         long ret = bpf_map_update_elem(&aggregated_flows, &id, aggregate_flow, BPF_ANY);
         if (ret != 0) {
             // usually error -16 (-EBUSY) is printed here.
@@ -127,8 +145,10 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
             rtt = MIN_RTT;
         }
         flow_metrics new_flow = {
-            .packets = 1,
-            .bytes = skb->len,
+            .packets = packets,
+            .bytes = bytes,
+            .nb_observed_intf = 1,
+            .eth_protocol = pkt.eth_protocol,
             .start_mono_time_ts = pkt.current_ts,
             .end_mono_time_ts = pkt.current_ts,
             .flags = pkt.flags,
@@ -139,6 +159,10 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
             .dns_record.errno = dns_errno,
             .flow_rtt = rtt,
         };
+        new_flow.observed_intf[0].if_index = skb->ifindex;
+        new_flow.observed_intf[0].direction = direction;
+        __builtin_memcpy(new_flow.dst_mac, pkt.dst_mac, ETH_ALEN);
+        __builtin_memcpy(new_flow.src_mac, pkt.src_mac, ETH_ALEN);
 
         // even if we know that the entry is new, another CPU might be concurrently inserting a flow
         // so we need to specify BPF_ANY

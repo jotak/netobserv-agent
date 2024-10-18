@@ -61,6 +61,8 @@ message Record {
   uint32 dns_errno = 25;
   repeated DupMapEntry dup_list = 26;
   repeated string network_events_metadata = 27;
+  repeated IP additional_src_addr = 28;
+  repeated IP additional_dst_addr = 29;
 }
 
 message DataLink {

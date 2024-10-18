@@ -14,18 +14,31 @@ func TestRecordBinaryEncoding(t *testing.T) {
 	// Makes sure that we read the C *packed* flow structure according
 	// to the order defined in bpf/flow.h
 	fr, err := ReadFrom(bytes.NewReader([]byte{
-		0x01, 0x02, // u16 eth_protocol
-		0x03,                               // u16 direction
-		0x04, 0x05, 0x06, 0x07, 0x08, 0x09, // data_link: u8[6] src_mac
-		0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, // data_link: u8[6] dst_mac
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x06, 0x07, 0x08, 0x09, // network: u8[16] src_ip
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x0a, 0x0b, 0x0c, 0x0d, // network: u32 dst_ip
 		0x0e, 0x0f, // transport: u16 src_port
 		0x10, 0x11, // transport: u16 dst_port
-		0x12,                   // transport: u8 transport_protocol
-		0x00,                   // icmp: u8 icmp_type
-		0x00,                   // icmp: u8 icmp_code
-		0x13, 0x14, 0x15, 0x16, // interface index
+		0x12,       // transport: u8 transport_protocol
+		0x00,       // icmp: u8 icmp_type
+		0x00,       // icmp: u8 icmp_code
+		0x01, 0x02, // u16 eth_protocol
+		0x03, 0x13, 0x14, 0x15, 0x16, // observed_intf[0]: u8 + u16
+		0x00, 0x00, 0x00, 0x00, 0x00, // observed_intf[1]: u8 + u16
+		0x00, 0x00, 0x00, 0x00, 0x00, // observed_intf[2]: u8 + u16
+		0x00, 0x00, 0x00, 0x00, 0x00, // observed_intf[3]: u8 + u16
+		0x01,                   // nb_observed_intf: u8
+		0xac, 0x1e, 0x00, 0x0c, // observed_src_ips[0]: u8[4]
+		0x00, 0x00, 0x00, 0x00, // observed_src_ips[1]: u8[4]
+		0x00, 0x00, 0x00, 0x00, // observed_src_ips[2]: u8[4]
+		0x00, 0x00, 0x00, 0x00, // observed_src_ips[3]: u8[4]
+		0x01,                   // nb_observed_src_ips: u8
+		0x00, 0x00, 0x00, 0x00, // observed_dst_ips[0]: u8[4]
+		0x00, 0x00, 0x00, 0x00, // observed_dst_ips[1]: u8[4]
+		0x00, 0x00, 0x00, 0x00, // observed_dst_ips[2]: u8[4]
+		0x00, 0x00, 0x00, 0x00, // observed_dst_ips[3]: u8[4]
+		0x00,                               // nb_observed_dst_ips: u8
+		0x04, 0x05, 0x06, 0x07, 0x08, 0x09, // data_link: u8[6] src_mac
+		0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, // data_link: u8[6] dst_mac
 		0x06, 0x07, 0x08, 0x09, // u32 packets
 		0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, // u64 bytes
 		0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, // u64 flow_start_time
@@ -58,10 +71,6 @@ func TestRecordBinaryEncoding(t *testing.T) {
 
 	assert.Equal(t, RawRecord{
 		Id: ebpf.BpfFlowId{
-			EthProtocol:       0x0201,
-			Direction:         0x03,
-			SrcMac:            MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
-			DstMac:            MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
 			SrcIp:             IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x06, 0x07, 0x08, 0x09},
 			DstIp:             IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x0a, 0x0b, 0x0c, 0x0d},
 			SrcPort:           0x0f0e,
@@ -69,16 +78,22 @@ func TestRecordBinaryEncoding(t *testing.T) {
 			TransportProtocol: 0x12,
 			IcmpType:          0x00,
 			IcmpCode:          0x00,
-			IfIndex:           0x16151413,
 		},
 		Metrics: ebpf.BpfFlowMetrics{
-			Packets:         0x09080706,
-			Bytes:           0x1a19181716151413,
-			StartMonoTimeTs: 0x1a19181716151413,
-			EndMonoTimeTs:   0x1a19181716151413,
-			Flags:           0x1413,
-			Errno:           0x33,
-			Dscp:            0x60,
+			EthProtocol:      0x0201,
+			ObservedIntf:     [4]ebpf.BpfPktObservationT{{Direction: 0x03, IfIndex: 0x16151413}},
+			NbObservedIntf:   1,
+			NbObservedSrcIps: 1,
+			ObservedSrcIps:   [4][4]uint8{{172, 30, 0, 12}},
+			SrcMac:           MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
+			DstMac:           MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
+			Packets:          0x09080706,
+			Bytes:            0x1a19181716151413,
+			StartMonoTimeTs:  0x1a19181716151413,
+			EndMonoTimeTs:    0x1a19181716151413,
+			Flags:            0x1413,
+			Errno:            0x33,
+			Dscp:             0x60,
 			PktDrops: ebpf.BpfPktDropsT{
 				Packets:         0x13121110,
 				Bytes:           0x1b1a191817161514,
@@ -104,4 +119,27 @@ func TestRecordBinaryEncoding(t *testing.T) {
 	// assert that IP addresses are interpreted as IPv4 addresses
 	assert.Equal(t, "6.7.8.9", IP(fr.Id.SrcIp).String())
 	assert.Equal(t, "10.11.12.13", IP(fr.Id.DstIp).String())
+}
+
+func TestAccumulateIPs(t *testing.T) {
+	base := [4][4]uint8{
+		{10, 11, 12, 13},
+		{20, 21, 22, 23},
+		{0, 0, 0, 0},
+		{0, 0, 0, 0},
+	}
+	size := uint8(2)
+	other := [4][4]uint8{
+		{10, 11, 12, 13},
+		{10, 11, 12, 42},
+		{30, 31, 32, 33},
+		{40, 41, 42, 43},
+	}
+	accumulateIPs(&size, &base, 4, other)
+	assert.Equal(t, [4][4]uint8{
+		{10, 11, 12, 13},
+		{20, 21, 22, 23},
+		{10, 11, 12, 42},
+		{30, 31, 32, 33},
+	}, base)
 }

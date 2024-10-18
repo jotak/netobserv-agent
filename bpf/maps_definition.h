@@ -9,6 +9,14 @@ struct {
     __uint(max_entries, 1 << 24);
 } direct_flows SEC(".maps");
 
+// Key: the packet identifier. Value: the flow id.
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __type(key, pkt_id);
+    __type(value, flow_id);
+    __uint(max_entries, 1 << 15);
+} pkt_flow_map SEC(".maps");
+
 // Key: the flow identifier. Value: the flow metrics for that identifier.
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_HASH);

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/netobserv/netobserv-ebpf-agent/pkg/ebpf"
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/metrics"
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/model"
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/pbflow"
@@ -29,10 +30,10 @@ func TestProtoConversion(t *testing.T) {
 	kj := KafkaProto{Writer: &wc, Metrics: m}
 	input := make(chan []*model.Record, 11)
 	record := model.Record{}
-	record.Id.EthProtocol = 3
-	record.Id.Direction = 1
-	record.Id.SrcMac = [...]byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
-	record.Id.DstMac = [...]byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66}
+	record.Metrics.EthProtocol = 3
+	record.Metrics.ObservedIntf = [4]ebpf.BpfPktObservationT{{Direction: 1}}
+	record.Metrics.SrcMac = [...]byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
+	record.Metrics.DstMac = [...]byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66}
 	record.Id.SrcIp = model.IPAddrFromNetIP(net.ParseIP("192.1.2.3"))
 	record.Id.DstIp = model.IPAddrFromNetIP(net.ParseIP("127.3.2.1"))
 	record.Id.SrcPort = 4321
@@ -44,7 +45,7 @@ func TestProtoConversion(t *testing.T) {
 	record.Metrics.Bytes = 789
 	record.Metrics.Packets = 987
 	record.Metrics.Flags = uint16(1)
-	record.Interface = "veth0"
+	record.Interfaces = []string{"veth0"}
 
 	input <- []*model.Record{&record}
 	close(input)
@@ -77,10 +78,10 @@ func TestProtoConversion(t *testing.T) {
 
 func TestIdenticalKeys(t *testing.T) {
 	record := model.Record{}
-	record.Id.EthProtocol = 3
-	record.Id.Direction = 1
-	record.Id.SrcMac = [...]byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
-	record.Id.DstMac = [...]byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66}
+	record.Metrics.EthProtocol = 3
+	record.Metrics.ObservedIntf = [4]ebpf.BpfPktObservationT{{Direction: 1}}
+	record.Metrics.SrcMac = [...]byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
+	record.Metrics.DstMac = [...]byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66}
 	record.Id.SrcIp = model.IPAddrFromNetIP(net.ParseIP("192.1.2.3"))
 	record.Id.DstIp = model.IPAddrFromNetIP(net.ParseIP("127.3.2.1"))
 	record.Id.SrcPort = 4321
@@ -92,7 +93,7 @@ func TestIdenticalKeys(t *testing.T) {
 	record.Metrics.Bytes = 789
 	record.Metrics.Packets = 987
 	record.Metrics.Flags = uint16(1)
-	record.Interface = "veth0"
+	record.Interfaces = []string{"veth0"}
 
 	key1 := getFlowKey(&record)
 

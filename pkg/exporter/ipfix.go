@@ -287,20 +287,20 @@ func setIERecordValue(record *model.Record, ieValPtr *entities.InfoElementWithVa
 	case "packetDeltaCount":
 		ieVal.SetUnsigned64Value(uint64(record.Metrics.Packets))
 	case "interfaceName":
-		ieVal.SetStringValue(record.Interface)
+		ieVal.SetStringValue(record.Interfaces[0])
 	}
 }
 func setIEValue(record *model.Record, ieValPtr *entities.InfoElementWithValue) {
 	ieVal := *ieValPtr
 	switch ieVal.GetName() {
 	case "ethernetType":
-		ieVal.SetUnsigned16Value(record.Id.EthProtocol)
+		ieVal.SetUnsigned16Value(record.Metrics.EthProtocol)
 	case "flowDirection":
-		ieVal.SetUnsigned8Value(record.Id.Direction)
+		ieVal.SetUnsigned8Value(record.Metrics.ObservedIntf[0].Direction)
 	case "sourceMacAddress":
-		ieVal.SetMacAddressValue(record.Id.SrcMac[:])
+		ieVal.SetMacAddressValue(record.Metrics.SrcMac[:])
 	case "destinationMacAddress":
-		ieVal.SetMacAddressValue(record.Id.DstMac[:])
+		ieVal.SetMacAddressValue(record.Metrics.DstMac[:])
 	case "sourceIPv4Address":
 		setIPv4Address(ieValPtr, model.IP(record.Id.SrcIp).To4())
 	case "destinationIPv4Address":
@@ -366,7 +366,7 @@ func (ipf *IPFIX) ExportFlows(input <-chan []*model.Record) {
 	log := ilog.WithField("collector", socket)
 	for inputRecords := range input {
 		for _, record := range inputRecords {
-			if record.Id.EthProtocol == model.IPv6Type {
+			if record.Metrics.EthProtocol == model.IPv6Type {
 				err := ipf.sendDataRecord(log, record, true)
 				if err != nil {
 					log.WithError(err).Error("Failed in send IPFIX data record")

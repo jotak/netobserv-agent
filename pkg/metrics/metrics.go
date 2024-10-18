@@ -123,6 +123,18 @@ var (
 		"component",
 		"error",
 	)
+	pktMapHit = defineMetric(
+		"pkt_map_hit_total",
+		"Packet map hits and misses",
+		TypeCounter,
+		"kind",
+	)
+	markStatus = defineMetric(
+		"mark_status",
+		"SKB mark status",
+		TypeCounter,
+		"kind",
+	)
 )
 
 func (def *MetricDefinition) mapLabels(labels []string) prometheus.Labels {
@@ -270,6 +282,14 @@ func (g *BufferSizeGauge) WithBufferName(bufferName string) prometheus.Gauge {
 
 func (m *Metrics) CreateBatchCounter(exporter string) prometheus.Counter {
 	return m.NewCounter(&exportedBatchCounterTotal, exporter)
+}
+
+func (m *Metrics) CreatePktMapHitCounter(kind string) prometheus.Counter {
+	return m.NewCounter(&pktMapHit, kind)
+}
+
+func (m *Metrics) CreateMarkStatusCounter(kind string) prometheus.Counter {
+	return m.NewCounter(&markStatus, kind)
 }
 
 func (m *Metrics) CreateSamplingRate() prometheus.Gauge {

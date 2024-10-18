@@ -32,6 +32,7 @@ const (
 	qdiscType = "clsact"
 	// ebpf map names as defined in bpf/maps_definition.h
 	aggregatedFlowsMap = "aggregated_flows"
+	pktFlowMap         = "pkt_flow_map"
 	dnsLatencyMap      = "dns_flows"
 	// constants defined in flows.c as "volatile const"
 	constSampling                       = "sampling"
@@ -78,6 +79,13 @@ type FlowFetcher struct {
 	ingressTCXLink              map[ifaces.Interface]link.Link
 	networkEventsMonitoringLink link.Link
 	lookupAndDeleteSupported    bool
+	pktMapHit                   prometheus.Counter
+	pktMapMiss                  prometheus.Counter
+	pktMapHitAvoided            prometheus.Counter
+	pktMapMissAvoided           prometheus.Counter
+	markSeen                    prometheus.Counter
+	markUnseen                  prometheus.Counter
+	markCollide                 prometheus.Counter
 }
 
 type FlowFetcherConfig struct {
@@ -98,7 +106,7 @@ type FlowFetcherConfig struct {
 }
 
 // nolint:golint,cyclop
-func NewFlowFetcher(cfg *FlowFetcherConfig) (*FlowFetcher, error) {
+func NewFlowFetcher(cfg *FlowFetcherConfig, m *metrics.Metrics) (*FlowFetcher, error) {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		log.WithError(err).
 			Warn("can't remove mem lock. The agent could not be able to start eBPF programs")
@@ -267,6 +275,13 @@ next:
 		ingressTCXLink:              map[ifaces.Interface]link.Link{},
 		networkEventsMonitoringLink: networkEventsMonitoringLink,
 		lookupAndDeleteSupported:    true, // this will be turned off later if found to be not supported
+		pktMapHit:                   m.CreatePktMapHitCounter("hit"),
+		pktMapMiss:                  m.CreatePktMapHitCounter("miss"),
+		pktMapHitAvoided:            m.CreatePktMapHitCounter("hit-avoided"),
+		pktMapMissAvoided:           m.CreatePktMapHitCounter("miss-avoided"),
+		markSeen:                    m.CreateMarkStatusCounter("seen"),
+		markUnseen:                  m.CreateMarkStatusCounter("unseen"),
+		markCollide:                 m.CreateMarkStatusCounter("collide"),
 	}, nil
 }
 
@@ -761,6 +776,8 @@ func (m *FlowFetcher) ReadGlobalCounter(met *metrics.Metrics) {
 	var allCPUValue []uint32
 	globalCounters := map[ebpf.BpfGlobalCountersKeyT]prometheus.Counter{
 		ebpf.BpfGlobalCountersKeyTHASHMAP_FLOWS_DROPPED:               met.DroppedFlowsCounter.WithSourceAndReason("flow-fetcher", "CannotUpdateFlowsHashMap"),
+		ebpf.BpfGlobalCountersKeyTHASHMAP_PACKETS_CANT_UPDATE:         met.Errors.WithErrorName("flow-fetcher", "CannotUpdatePacketsHashMap"),
+		ebpf.BpfGlobalCountersKeyTHASHMAP_PACKETS_CANT_DELETE:         met.Errors.WithErrorName("flow-fetcher", "CannotDeletePacketsHashMap"),
 		ebpf.BpfGlobalCountersKeyTFILTER_REJECT:                       met.FilteredFlowsCounter.WithSourceAndReason("flow-filtering", "FilterReject"),
 		ebpf.BpfGlobalCountersKeyTFILTER_ACCEPT:                       met.FilteredFlowsCounter.WithSourceAndReason("flow-filtering", "FilterAccept"),
 		ebpf.BpfGlobalCountersKeyTFILTER_NOMATCH:                      met.FilteredFlowsCounter.WithSourceAndReason("flow-filtering", "FilterNoMatch"),
@@ -768,6 +785,13 @@ func (m *FlowFetcher) ReadGlobalCounter(met *metrics.Metrics) {
 		ebpf.BpfGlobalCountersKeyTNETWORK_EVENTS_ERR_GROUPID_MISMATCH: met.NetworkEventsCounter.WithSourceAndReason("network-events", "NetworkEventsErrorsGroupIDMismatch"),
 		ebpf.BpfGlobalCountersKeyTNETWORK_EVENTS_ERR_UPDATE_MAP_FLOWS: met.NetworkEventsCounter.WithSourceAndReason("network-events", "NetworkEventsErrorsFlowMapUpdate"),
 		ebpf.BpfGlobalCountersKeyTNETWORK_EVENTS_GOOD:                 met.NetworkEventsCounter.WithSourceAndReason("network-events", "NetworkEventsGoodEvent"),
+		ebpf.BpfGlobalCountersKeyTPKT_MAP_HIT:                         m.pktMapHit,
+		ebpf.BpfGlobalCountersKeyTPKT_MAP_MISS:                        m.pktMapMiss,
+		ebpf.BpfGlobalCountersKeyTPKT_MAP_HIT_AVOID_COLLISION:         m.pktMapHitAvoided,
+		ebpf.BpfGlobalCountersKeyTPKT_MAP_MISS_AVOID_DUPLICATION:      m.pktMapMissAvoided,
+		ebpf.BpfGlobalCountersKeyTMARK_0:                              m.markUnseen,
+		ebpf.BpfGlobalCountersKeyTMARK_SEEN:                           m.markSeen,
+		ebpf.BpfGlobalCountersKeyTMARK_OTHER:                          m.markCollide,
 	}
 	zeroCounters := make([]uint32, cilium.MustPossibleCPU())
 	for key := ebpf.BpfGlobalCountersKeyT(0); key < ebpf.BpfGlobalCountersKeyTMAX_COUNTERS; key++ {
@@ -1104,6 +1128,7 @@ func NewPacketFetcher(cfg *FlowFetcherConfig) (*PacketFetcher, error) {
 	delete(spec.Programs, tcpRcvKprobe)
 	delete(spec.Programs, tcpFentryHook)
 	delete(spec.Programs, aggregatedFlowsMap)
+	delete(spec.Programs, pktFlowMap)
 	delete(spec.Programs, constSampling)
 	delete(spec.Programs, constTraceMessages)
 	delete(spec.Programs, constEnableDNSTracking)

@@ -11,10 +11,12 @@ import (
 
 func TestPacketAggregation(t *testing.T) {
 	type testCase struct {
+		name     string
 		input    []ebpf.BpfFlowMetrics
 		expected ebpf.BpfFlowMetrics
 	}
 	tcs := []testCase{{
+		name: "single valid entry and empty",
 		input: []ebpf.BpfFlowMetrics{
 			{Packets: 0, Bytes: 0, StartMonoTimeTs: 0, EndMonoTimeTs: 0, Flags: 1},
 			{Packets: 0x7, Bytes: 0x22d, StartMonoTimeTs: 0x176a790b240b, EndMonoTimeTs: 0x176a792a755b, Flags: 1},
@@ -25,6 +27,7 @@ func TestPacketAggregation(t *testing.T) {
 			Packets: 0x7, Bytes: 0x22d, StartMonoTimeTs: 0x176a790b240b, EndMonoTimeTs: 0x176a792a755b, Flags: 1,
 		},
 	}, {
+		name: "two valid entries and empty",
 		input: []ebpf.BpfFlowMetrics{
 			{Packets: 0x3, Bytes: 0x5c4, StartMonoTimeTs: 0x17f3e9613a7f, EndMonoTimeTs: 0x17f3e979816e, Flags: 1},
 			{Packets: 0x2, Bytes: 0x8c, StartMonoTimeTs: 0x17f3e9633a7f, EndMonoTimeTs: 0x17f3e96f164e, Flags: 1},
@@ -35,6 +38,7 @@ func TestPacketAggregation(t *testing.T) {
 			Packets: 0x5, Bytes: 0x5c4 + 0x8c, StartMonoTimeTs: 0x17f3e9613a7f, EndMonoTimeTs: 0x17f3e979816e, Flags: 1,
 		},
 	}, {
+		name: "duplicate net events",
 		input: []ebpf.BpfFlowMetrics{
 			{Packets: 0x3, Bytes: 0x5c4, StartMonoTimeTs: 0x17f3e9613a7f, EndMonoTimeTs: 0x17f3e979816e, Flags: 1, NetworkEventsIdx: 1,
 				NetworkEvents: [4][8]uint8{
@@ -56,6 +60,7 @@ func TestPacketAggregation(t *testing.T) {
 			},
 		},
 	}, {
+		name: "net events + empty net event",
 		input: []ebpf.BpfFlowMetrics{
 			{Packets: 0x3, Bytes: 0x5c4, StartMonoTimeTs: 0x17f3e9613a7f, EndMonoTimeTs: 0x17f3e979816e, Flags: 1, NetworkEventsIdx: 1,
 				NetworkEvents: [4][8]uint8{
@@ -75,6 +80,7 @@ func TestPacketAggregation(t *testing.T) {
 			},
 		},
 	}, {
+		name: "different net events",
 		input: []ebpf.BpfFlowMetrics{
 			{Packets: 0x3, Bytes: 0x5c4, StartMonoTimeTs: 0x17f3e9613a7f, EndMonoTimeTs: 0x17f3e979816e, Flags: 1, NetworkEventsIdx: 1,
 				NetworkEvents: [4][8]uint8{
@@ -97,6 +103,7 @@ func TestPacketAggregation(t *testing.T) {
 			},
 		},
 	}, {
+		name: "3 different net events",
 		input: []ebpf.BpfFlowMetrics{
 			{Packets: 0x3, Bytes: 0x5c4, StartMonoTimeTs: 0x17f3e9613a7f, EndMonoTimeTs: 0x17f3e979816e, Flags: 1, NetworkEventsIdx: 2,
 				NetworkEvents: [4][8]uint8{
@@ -125,9 +132,7 @@ func TestPacketAggregation(t *testing.T) {
 	ft := MapTracer{}
 	for i, tc := range tcs {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
-			assert.Equal(t,
-				tc.expected,
-				*ft.aggregate(tc.input))
+			assert.Equalf(t, tc.expected, *ft.aggregate(tc.input), "Test name: %s", tc.name)
 		})
 	}
 }

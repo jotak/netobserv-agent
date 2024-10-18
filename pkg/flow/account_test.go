@@ -111,7 +111,6 @@ func TestEvict_MaxEntries(t *testing.T) {
 			},
 			TimeFlowStart:          now.Add(-(1000 - 123) * time.Nanosecond),
 			TimeFlowEnd:            now.Add(-(1000 - 789) * time.Nanosecond),
-			DupList:                make([]map[string]uint8, 0),
 			NetworkMonitorEventsMD: make([]string, 0),
 		},
 		k2: {
@@ -123,7 +122,6 @@ func TestEvict_MaxEntries(t *testing.T) {
 			},
 			TimeFlowStart:          now.Add(-(1000 - 456) * time.Nanosecond),
 			TimeFlowEnd:            now.Add(-(1000 - 456) * time.Nanosecond),
-			DupList:                make([]map[string]uint8, 0),
 			NetworkMonitorEventsMD: make([]string, 0),
 		},
 	}, received)
@@ -193,7 +191,6 @@ func TestEvict_Period(t *testing.T) {
 		},
 		TimeFlowStart:          now.Add(-1000 + 123),
 		TimeFlowEnd:            now.Add(-1000 + 789),
-		DupList:                make([]map[string]uint8, 0),
 		NetworkMonitorEventsMD: make([]string, 0),
 	}, *records[0])
 	records = receiveTimeout(t, evictor)
@@ -211,7 +208,6 @@ func TestEvict_Period(t *testing.T) {
 		},
 		TimeFlowStart:          now.Add(-1000 + 1123),
 		TimeFlowEnd:            now.Add(-1000 + 1456),
-		DupList:                make([]map[string]uint8, 0),
 		NetworkMonitorEventsMD: make([]string, 0),
 	}, *records[0])
 

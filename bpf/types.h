@@ -62,6 +62,7 @@ typedef __u64 u64;
 #define MAX_FILTER_ENTRIES 1 // we have only one global filter
 #define MAX_EVENT_MD 8
 #define MAX_NETWORK_EVENTS 4
+#define MAX_FLOW_OBSERVATIONS 4
 
 // according to field 61 in https://www.iana.org/assignments/ipfix/ipfix.xhtml
 typedef enum direction_t {
@@ -75,6 +76,20 @@ const enum direction_t *unused8 __attribute__((unused));
 const u8 ip4in6[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
 
 typedef struct flow_metrics_t {
+    u16 eth_protocol;
+    struct pkt_observation_t {
+        u8 direction;
+        u32 if_index;
+    } __attribute__((packed)) observed_intf[MAX_FLOW_OBSERVATIONS];
+    u8 nb_observed_intf;
+    u8 observed_src_ips[4][MAX_FLOW_OBSERVATIONS];    // IPv4 only
+    u8 nb_observed_src_ips;
+    u8 observed_dst_ips[4][MAX_FLOW_OBSERVATIONS];    // IPv4 only
+    u8 nb_observed_dst_ips;
+    // L2 data link layer
+    u8 src_mac[ETH_ALEN];
+    u8 dst_mac[ETH_ALEN];
+    // OS interface index
     u32 packets;
     u64 bytes;
     // Flow start and end times as monotomic timestamps in nanoseconds
@@ -113,13 +128,18 @@ const struct pkt_drops_t *unused0 __attribute__((unused));
 // Force emitting struct flow_metrics into the ELF.
 const struct flow_metrics_t *unused1 __attribute__((unused));
 
+// Attributes that uniquely identify a packet
+typedef struct pkt_id_t {
+    u64 skb_ref;
+    u32 hash;
+    u64 tstamp;
+} __attribute__((packed)) pkt_id;
+
+// Force emitting struct pkt_id into the ELF.
+const struct pkt_id_t *unused2 __attribute__((unused));
+
 // Attributes that uniquely identify a flow
 typedef struct flow_id_t {
-    u16 eth_protocol;
-    u8 direction;
-    // L2 data link layer
-    u8 src_mac[ETH_ALEN];
-    u8 dst_mac[ETH_ALEN];
     // L3 network layer
     // IPv4 addresses are encoded as IPv6 addresses with prefix ::ffff/96
     // as described in https://datatracker.ietf.org/doc/html/rfc4038#section-4.2
@@ -132,12 +152,10 @@ typedef struct flow_id_t {
     // ICMP protocol
     u8 icmp_type;
     u8 icmp_code;
-    // OS interface index
-    u32 if_index;
 } __attribute__((packed)) flow_id;
 
 // Force emitting struct flow_id into the ELF.
-const struct flow_id_t *unused2 __attribute__((unused));
+const struct flow_id_t *unused11 __attribute__((unused));
 
 // Flow record is a tuple containing both flow identifier and metrics. It is used to send
 // a complete flow via ring buffer when only when the accounting hashmap is full.
@@ -157,6 +175,11 @@ const struct dns_record_t *unused4 __attribute__((unused));
 typedef struct pkt_info_t {
     flow_id *id;
     u64 current_ts; // ts recorded when pkt came.
+    u32 if_index;   // OS interface index
+    u16 eth_protocol;
+    u8 direction;
+    u8 src_mac[ETH_ALEN];
+    u8 dst_mac[ETH_ALEN];
     u16 flags;      // TCP specific
     void *l4_hdr;   // Stores the actual l4 header
     u8 dscp;        // IPv4/6 DSCP value
@@ -185,6 +208,8 @@ typedef struct dns_flow_id_t {
 // Enum to define global counters keys and share it with userspace
 typedef enum global_counters_key_t {
     HASHMAP_FLOWS_DROPPED,
+    HASHMAP_PACKETS_CANT_UPDATE,
+    HASHMAP_PACKETS_CANT_DELETE,
     FILTER_REJECT,
     FILTER_ACCEPT,
     FILTER_NOMATCH,
@@ -192,6 +217,13 @@ typedef enum global_counters_key_t {
     NETWORK_EVENTS_ERR_GROUPID_MISMATCH,
     NETWORK_EVENTS_ERR_UPDATE_MAP_FLOWS,
     NETWORK_EVENTS_GOOD,
+    PKT_MAP_HIT,
+    PKT_MAP_HIT_AVOID_COLLISION,
+    PKT_MAP_MISS,
+    PKT_MAP_MISS_AVOID_DUPLICATION,
+    MARK_0,
+    MARK_SEEN,
+    MARK_OTHER,
     MAX_COUNTERS,
 } global_counters_key;
 
@@ -240,5 +272,8 @@ struct filter_value_t {
 } __attribute__((packed));
 // Force emitting struct filter_value_t into the ELF.
 const struct filter_value_t *unused9 __attribute__((unused));
+
+// Force emitting struct pkt_observation into the ELF.
+const struct pkt_observation_t *unused12 __attribute__((unused));
 
 #endif /* __TYPES_H__ */

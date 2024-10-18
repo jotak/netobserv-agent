@@ -7,6 +7,7 @@
 #include "flows_filter.h"
 
 static u8 do_sampling = 0;
+static u32 mark_bit = 1 << 21;
 
 // Update global counter for hashmap update errors
 static inline void increase_counter(u32 key) {
@@ -153,14 +154,14 @@ static inline int fill_ethhdr(struct ethhdr *eth, void *data_end, pkt_info *pkt)
         return DISCARD;
     }
     flow_id *id = pkt->id;
-    __builtin_memcpy(id->dst_mac, eth->h_dest, ETH_ALEN);
-    __builtin_memcpy(id->src_mac, eth->h_source, ETH_ALEN);
-    id->eth_protocol = bpf_ntohs(eth->h_proto);
+    __builtin_memcpy(pkt->dst_mac, eth->h_dest, ETH_ALEN);
+    __builtin_memcpy(pkt->src_mac, eth->h_source, ETH_ALEN);
+    pkt->eth_protocol = bpf_ntohs(eth->h_proto);
 
-    if (id->eth_protocol == ETH_P_IP) {
+    if (pkt->eth_protocol == ETH_P_IP) {
         struct iphdr *ip = (void *)eth + sizeof(*eth);
         return fill_iphdr(ip, data_end, pkt);
-    } else if (id->eth_protocol == ETH_P_IPV6) {
+    } else if (pkt->eth_protocol == ETH_P_IPV6) {
         struct ipv6hdr *ip6 = (void *)eth + sizeof(*eth);
         return fill_ip6hdr(ip6, data_end, pkt);
     } else {
@@ -178,12 +179,11 @@ static inline int fill_ethhdr(struct ethhdr *eth, void *data_end, pkt_info *pkt)
 /*
  * check if flow filter is enabled and if we need to continue processing the packet or not
  */
-static inline bool check_and_do_flow_filtering(flow_id *id, u16 flags, u32 drop_reason) {
+static inline bool check_and_do_flow_filtering(pkt_info *pkt, u32 drop_reason) {
     // check if this packet need to be filtered if filtering feature is enabled
     if (enable_flows_filtering || enable_pca) {
         filter_action action = ACCEPT;
-        if (is_flow_filtered(id, &action, flags, drop_reason) != 0 &&
-            action != MAX_FILTER_ACTIONS) {
+        if (is_flow_filtered(pkt, &action, drop_reason) != 0 && action != MAX_FILTER_ACTIONS) {
             // we have matching rules follow through the actions to decide if we should accept or reject the flow
             // and update global counter for both cases
             bool skip = false;
@@ -221,7 +221,7 @@ static inline bool check_and_do_flow_filtering(flow_id *id, u16 flags, u32 drop_
     return false;
 }
 
-static inline void core_fill_in_l2(struct sk_buff *skb, flow_id *id, u16 *family) {
+static inline void core_fill_in_l2(struct sk_buff *skb, pkt_info *pkt, u16 *family) {
     struct ethhdr eth;
 
     __builtin_memset(&eth, 0, sizeof(eth));
@@ -230,18 +230,17 @@ static inline void core_fill_in_l2(struct sk_buff *skb, flow_id *id, u16 *family
     u16 skb_mac_header = BPF_CORE_READ(skb, mac_header);
 
     bpf_probe_read(&eth, sizeof(eth), (struct ethhdr *)(skb_head + skb_mac_header));
-    __builtin_memcpy(id->dst_mac, eth.h_dest, ETH_ALEN);
-    __builtin_memcpy(id->src_mac, eth.h_source, ETH_ALEN);
-    id->eth_protocol = bpf_ntohs(eth.h_proto);
-    if (id->eth_protocol == ETH_P_IP) {
+    __builtin_memcpy(pkt->dst_mac, eth.h_dest, ETH_ALEN);
+    __builtin_memcpy(pkt->src_mac, eth.h_source, ETH_ALEN);
+    pkt->eth_protocol = bpf_ntohs(eth.h_proto);
+    if (pkt->eth_protocol == ETH_P_IP) {
         *family = AF_INET;
-    } else if (id->eth_protocol == ETH_P_IPV6) {
+    } else if (pkt->eth_protocol == ETH_P_IPV6) {
         *family = AF_INET6;
     }
 }
 
-static inline void core_fill_in_l3(struct sk_buff *skb, flow_id *id, u16 family, u8 *protocol,
-                                   u8 *dscp) {
+static inline void core_fill_in_l3(struct sk_buff *skb, pkt_info *pkt, u16 family, u8 *protocol, u8 *dscp) {
     u16 skb_network_header = BPF_CORE_READ(skb, network_header);
     u8 *skb_head = BPF_CORE_READ(skb, head);
 
@@ -250,10 +249,10 @@ static inline void core_fill_in_l3(struct sk_buff *skb, flow_id *id, u16 family,
         struct iphdr ip;
         __builtin_memset(&ip, 0, sizeof(ip));
         bpf_probe_read(&ip, sizeof(ip), (struct iphdr *)(skb_head + skb_network_header));
-        __builtin_memcpy(id->src_ip, ip4in6, sizeof(ip4in6));
-        __builtin_memcpy(id->dst_ip, ip4in6, sizeof(ip4in6));
-        __builtin_memcpy(id->src_ip + sizeof(ip4in6), &ip.saddr, sizeof(ip.saddr));
-        __builtin_memcpy(id->dst_ip + sizeof(ip4in6), &ip.daddr, sizeof(ip.daddr));
+        __builtin_memcpy(pkt->id->src_ip, ip4in6, sizeof(ip4in6));
+        __builtin_memcpy(pkt->id->dst_ip, ip4in6, sizeof(ip4in6));
+        __builtin_memcpy(pkt->id->src_ip + sizeof(ip4in6), &ip.saddr, sizeof(ip.saddr));
+        __builtin_memcpy(pkt->id->dst_ip + sizeof(ip4in6), &ip.daddr, sizeof(ip.daddr));
         *dscp = ipv4_get_dscp(&ip);
         *protocol = ip.protocol;
         break;
@@ -262,8 +261,8 @@ static inline void core_fill_in_l3(struct sk_buff *skb, flow_id *id, u16 family,
         struct ipv6hdr ip;
         __builtin_memset(&ip, 0, sizeof(ip));
         bpf_probe_read(&ip, sizeof(ip), (struct ipv6hdr *)(skb_head + skb_network_header));
-        __builtin_memcpy(id->src_ip, ip.saddr.in6_u.u6_addr8, IP_MAX_LEN);
-        __builtin_memcpy(id->dst_ip, ip.daddr.in6_u.u6_addr8, IP_MAX_LEN);
+        __builtin_memcpy(pkt->id->src_ip, ip.saddr.in6_u.u6_addr8, IP_MAX_LEN);
+        __builtin_memcpy(pkt->id->dst_ip, ip.daddr.in6_u.u6_addr8, IP_MAX_LEN);
         *dscp = ipv6_get_dscp(&ip);
         *protocol = ip.nexthdr;
         break;
@@ -273,7 +272,7 @@ static inline void core_fill_in_l3(struct sk_buff *skb, flow_id *id, u16 family,
     }
 }
 
-static inline void core_fill_in_tcp(struct sk_buff *skb, flow_id *id, u16 *flags) {
+static inline void core_fill_in_tcp(struct sk_buff *skb, pkt_info *pkt) {
     u16 skb_transport_header = BPF_CORE_READ(skb, transport_header);
     u8 *skb_head = BPF_CORE_READ(skb, head);
     struct tcphdr tcp;
@@ -284,13 +283,13 @@ static inline void core_fill_in_tcp(struct sk_buff *skb, flow_id *id, u16 *flags
     bpf_probe_read(&tcp, sizeof(tcp), (struct tcphdr *)(skb_head + skb_transport_header));
     sport = bpf_ntohs(tcp.source);
     dport = bpf_ntohs(tcp.dest);
-    id->src_port = sport;
-    id->dst_port = dport;
-    set_flags(&tcp, flags);
-    id->transport_protocol = IPPROTO_TCP;
+    pkt->id->src_port = sport;
+    pkt->id->dst_port = dport;
+    set_flags(&tcp, &pkt->flags);
+    pkt->id->transport_protocol = IPPROTO_TCP;
 }
 
-static inline void core_fill_in_udp(struct sk_buff *skb, flow_id *id) {
+static inline void core_fill_in_udp(struct sk_buff *skb, pkt_info *pkt) {
     u16 skb_transport_header = BPF_CORE_READ(skb, transport_header);
     u8 *skb_head = BPF_CORE_READ(skb, head);
     struct udphdr udp;
@@ -301,12 +300,12 @@ static inline void core_fill_in_udp(struct sk_buff *skb, flow_id *id) {
     bpf_probe_read(&udp, sizeof(udp), (struct udphdr *)(skb_head + skb_transport_header));
     sport = bpf_ntohs(udp.source);
     dport = bpf_ntohs(udp.dest);
-    id->src_port = sport;
-    id->dst_port = dport;
-    id->transport_protocol = IPPROTO_UDP;
+    pkt->id->src_port = sport;
+    pkt->id->dst_port = dport;
+    pkt->id->transport_protocol = IPPROTO_UDP;
 }
 
-static inline void core_fill_in_sctp(struct sk_buff *skb, flow_id *id) {
+static inline void core_fill_in_sctp(struct sk_buff *skb, pkt_info *pkt) {
     u16 skb_transport_header = BPF_CORE_READ(skb, transport_header);
     u8 *skb_head = BPF_CORE_READ(skb, head);
     struct sctphdr sctp;
@@ -317,33 +316,33 @@ static inline void core_fill_in_sctp(struct sk_buff *skb, flow_id *id) {
     bpf_probe_read(&sctp, sizeof(sctp), (struct sctphdr *)(skb_head + skb_transport_header));
     sport = bpf_ntohs(sctp.source);
     dport = bpf_ntohs(sctp.dest);
-    id->src_port = sport;
-    id->dst_port = dport;
-    id->transport_protocol = IPPROTO_SCTP;
+    pkt->id->src_port = sport;
+    pkt->id->dst_port = dport;
+    pkt->id->transport_protocol = IPPROTO_SCTP;
 }
 
-static inline void core_fill_in_icmpv4(struct sk_buff *skb, flow_id *id) {
+static inline void core_fill_in_icmpv4(struct sk_buff *skb, pkt_info *pkt) {
     u16 skb_transport_header = BPF_CORE_READ(skb, transport_header);
     u8 *skb_head = BPF_CORE_READ(skb, head);
     struct icmphdr icmph;
     __builtin_memset(&icmph, 0, sizeof(icmph));
 
     bpf_probe_read(&icmph, sizeof(icmph), (struct icmphdr *)(skb_head + skb_transport_header));
-    id->icmp_type = icmph.type;
-    id->icmp_code = icmph.code;
-    id->transport_protocol = IPPROTO_ICMP;
+    pkt->id->icmp_type = icmph.type;
+    pkt->id->icmp_code = icmph.code;
+    pkt->id->transport_protocol = IPPROTO_ICMP;
 }
 
-static inline void core_fill_in_icmpv6(struct sk_buff *skb, flow_id *id) {
+static inline void core_fill_in_icmpv6(struct sk_buff *skb, pkt_info *pkt) {
     u16 skb_transport_header = BPF_CORE_READ(skb, transport_header);
     u8 *skb_head = BPF_CORE_READ(skb, head);
     struct icmp6hdr icmph;
     __builtin_memset(&icmph, 0, sizeof(icmph));
 
     bpf_probe_read(&icmph, sizeof(icmph), (struct icmp6hdr *)(skb_head + skb_transport_header));
-    id->icmp_type = icmph.icmp6_type;
-    id->icmp_code = icmph.icmp6_code;
-    id->transport_protocol = IPPROTO_ICMPV6;
+    pkt->id->icmp_type = icmph.icmp6_type;
+    pkt->id->icmp_code = icmph.icmp6_code;
+    pkt->id->transport_protocol = IPPROTO_ICMPV6;
 }
 
 static inline void fill_in_others_protocol(flow_id *id, u8 protocol) {
