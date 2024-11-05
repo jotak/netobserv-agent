@@ -81,8 +81,8 @@ type FlowFetcher struct {
 	lookupAndDeleteSupported    bool
 	pktMapHit                   prometheus.Counter
 	pktMapMiss                  prometheus.Counter
-	pktMapHitAvoided            prometheus.Counter
-	pktMapMissAvoided           prometheus.Counter
+	pktMapColl                  prometheus.Counter
+	pktMapDupl                  prometheus.Counter
 	markSeen                    prometheus.Counter
 	markUnseen                  prometheus.Counter
 	markCollide                 prometheus.Counter
@@ -277,8 +277,8 @@ next:
 		lookupAndDeleteSupported:    true, // this will be turned off later if found to be not supported
 		pktMapHit:                   m.CreatePktMapHitCounter("hit"),
 		pktMapMiss:                  m.CreatePktMapHitCounter("miss"),
-		pktMapHitAvoided:            m.CreatePktMapHitCounter("hit-avoided"),
-		pktMapMissAvoided:           m.CreatePktMapHitCounter("miss-avoided"),
+		pktMapColl:                  m.CreatePktMapHitCounter("avoided-potential-collision"),
+		pktMapDupl:                  m.CreatePktMapHitCounter("potential-duplication"),
 		markSeen:                    m.CreateMarkStatusCounter("seen"),
 		markUnseen:                  m.CreateMarkStatusCounter("unseen"),
 		markCollide:                 m.CreateMarkStatusCounter("collide"),
@@ -787,8 +787,8 @@ func (m *FlowFetcher) ReadGlobalCounter(met *metrics.Metrics) {
 		ebpf.BpfGlobalCountersKeyTNETWORK_EVENTS_GOOD:                 met.NetworkEventsCounter.WithSourceAndReason("network-events", "NetworkEventsGoodEvent"),
 		ebpf.BpfGlobalCountersKeyTPKT_MAP_HIT:                         m.pktMapHit,
 		ebpf.BpfGlobalCountersKeyTPKT_MAP_MISS:                        m.pktMapMiss,
-		ebpf.BpfGlobalCountersKeyTPKT_MAP_HIT_AVOID_COLLISION:         m.pktMapHitAvoided,
-		ebpf.BpfGlobalCountersKeyTPKT_MAP_MISS_AVOID_DUPLICATION:      m.pktMapMissAvoided,
+		ebpf.BpfGlobalCountersKeyTPKT_MAP_AVOID_POTENTIAL_COLLISION:   m.pktMapColl,
+		ebpf.BpfGlobalCountersKeyTPKT_MAP_POTENTIAL_DUPLICATION:       m.pktMapDupl,
 		ebpf.BpfGlobalCountersKeyTMARK_0:                              m.markUnseen,
 		ebpf.BpfGlobalCountersKeyTMARK_SEEN:                           m.markSeen,
 		ebpf.BpfGlobalCountersKeyTMARK_OTHER:                          m.markCollide,

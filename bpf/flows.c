@@ -95,11 +95,6 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
     if (dedup == 0) {
         return TC_ACT_OK;
     }
-    if (dedup == 2) {
-        // Do not increase flow counters
-        packets = 0;
-        bytes = 0;
-    }
 
     int dns_errno = 0;
     if (enable_dns_tracking) {

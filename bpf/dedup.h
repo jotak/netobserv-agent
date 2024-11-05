@@ -66,8 +66,7 @@ static inline flow_id* get_or_add_flow_for_packet(flow_id *fid, pkt_id *pkt_hash
         // Potential collision. Do not try to get flow id. Delete in case it exists.
         bpf_map_delete_elem(&pkt_flow_map, pkt_hash_ts);
         bpf_map_delete_elem(&pkt_flow_map, pkt_addr_ts);
-        // TODO counter is inacurrate there's no actual hit
-        increase_counter(PKT_MAP_HIT_AVOID_COLLISION);
+        increase_counter(PKT_MAP_AVOID_POTENTIAL_COLLISION);
     } else {
         // Retry with hash+ts
         stored_id = (flow_id *)bpf_map_lookup_elem(&pkt_flow_map, pkt_hash_ts);
@@ -167,9 +166,7 @@ static inline int check_dup(struct __sk_buff *skb, u8 direction, pkt_info *pkt) 
 
     if (mark == mark_bit) {
         // We reached this point despite mark being set, meaning we went into a map-miss for an already seen packet (e.g. due to skb address change)
-        // Do not increase flow counters
-        increase_counter(PKT_MAP_MISS_AVOID_DUPLICATION);
-        return 2;
+        increase_counter(PKT_MAP_POTENTIAL_DUPLICATION);
     }
     return 1;
 }

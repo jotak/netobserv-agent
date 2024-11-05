@@ -129,9 +129,9 @@ const (
 	BpfGlobalCountersKeyTNETWORK_EVENTS_ERR_UPDATE_MAP_FLOWS BpfGlobalCountersKeyT = 8
 	BpfGlobalCountersKeyTNETWORK_EVENTS_GOOD                 BpfGlobalCountersKeyT = 9
 	BpfGlobalCountersKeyTPKT_MAP_HIT                         BpfGlobalCountersKeyT = 10
-	BpfGlobalCountersKeyTPKT_MAP_HIT_AVOID_COLLISION         BpfGlobalCountersKeyT = 11
-	BpfGlobalCountersKeyTPKT_MAP_MISS                        BpfGlobalCountersKeyT = 12
-	BpfGlobalCountersKeyTPKT_MAP_MISS_AVOID_DUPLICATION      BpfGlobalCountersKeyT = 13
+	BpfGlobalCountersKeyTPKT_MAP_MISS                        BpfGlobalCountersKeyT = 11
+	BpfGlobalCountersKeyTPKT_MAP_AVOID_POTENTIAL_COLLISION   BpfGlobalCountersKeyT = 12
+	BpfGlobalCountersKeyTPKT_MAP_POTENTIAL_DUPLICATION       BpfGlobalCountersKeyT = 13
 	BpfGlobalCountersKeyTMARK_0                              BpfGlobalCountersKeyT = 14
 	BpfGlobalCountersKeyTMARK_SEEN                           BpfGlobalCountersKeyT = 15
 	BpfGlobalCountersKeyTMARK_OTHER                          BpfGlobalCountersKeyT = 16
