@@ -82,9 +82,9 @@ typedef struct flow_metrics_t {
         u32 if_index;
     } __attribute__((packed)) observed_intf[MAX_FLOW_OBSERVATIONS];
     u8 nb_observed_intf;
-    u8 observed_src_ips[4][MAX_FLOW_OBSERVATIONS];    // IPv4 only
+    u8 observed_src_ips[4][MAX_FLOW_OBSERVATIONS]; // IPv4 only
     u8 nb_observed_src_ips;
-    u8 observed_dst_ips[4][MAX_FLOW_OBSERVATIONS];    // IPv4 only
+    u8 observed_dst_ips[4][MAX_FLOW_OBSERVATIONS]; // IPv4 only
     u8 nb_observed_dst_ips;
     // L2 data link layer
     u8 src_mac[ETH_ALEN];
@@ -180,9 +180,9 @@ typedef struct pkt_info_t {
     u8 direction;
     u8 src_mac[ETH_ALEN];
     u8 dst_mac[ETH_ALEN];
-    u16 flags;      // TCP specific
-    void *l4_hdr;   // Stores the actual l4 header
-    u8 dscp;        // IPv4/6 DSCP value
+    u16 flags;    // TCP specific
+    void *l4_hdr; // Stores the actual l4 header
+    u8 dscp;      // IPv4/6 DSCP value
     u16 dns_id;
     u16 dns_flags;
     u64 dns_latency;

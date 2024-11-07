@@ -240,7 +240,8 @@ static inline void core_fill_in_l2(struct sk_buff *skb, pkt_info *pkt, u16 *fami
     }
 }
 
-static inline void core_fill_in_l3(struct sk_buff *skb, pkt_info *pkt, u16 family, u8 *protocol, u8 *dscp) {
+static inline void core_fill_in_l3(struct sk_buff *skb, pkt_info *pkt, u16 family, u8 *protocol,
+                                   u8 *dscp) {
     u16 skb_network_header = BPF_CORE_READ(skb, network_header);
     u8 *skb_head = BPF_CORE_READ(skb, head);
 

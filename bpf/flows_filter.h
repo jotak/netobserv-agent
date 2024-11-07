@@ -36,7 +36,8 @@ static __always_inline int is_equal_ip(u8 *ip1, u8 *ip2, u8 len) {
 }
 
 static __always_inline int do_flow_filter_lookup(pkt_info *pkt, struct filter_key_t *key,
-                                                 filter_action *action, u8 len, u8 offset, u32 drop_reason) {
+                                                 filter_action *action, u8 len, u8 offset,
+                                                 u32 drop_reason) {
     int result = 0;
 
     struct filter_value_t *rule = (struct filter_value_t *)bpf_map_lookup_elem(&filter_map, key);
@@ -59,7 +60,8 @@ static __always_inline int do_flow_filter_lookup(pkt_info *pkt, struct filter_ke
                 // dstPort matching
                 if ((rule->dstPortStart != 0 && rule->dstPortEnd == 0) || rule->dstPort1 != 0 ||
                     rule->dstPort2 != 0) {
-                    if (rule->dstPortStart == pkt->id->dst_port || rule->dstPort1 == pkt->id->dst_port ||
+                    if (rule->dstPortStart == pkt->id->dst_port ||
+                        rule->dstPort1 == pkt->id->dst_port ||
                         rule->dstPort2 == pkt->id->dst_port) {
                         BPF_PRINTK("dstPort matched\n");
                         result++;
@@ -68,7 +70,8 @@ static __always_inline int do_flow_filter_lookup(pkt_info *pkt, struct filter_ke
                         goto end;
                     }
                 } else if (rule->dstPortStart != 0 && rule->dstPortEnd != 0) {
-                    if (rule->dstPortStart <= pkt->id->dst_port && pkt->id->dst_port <= rule->dstPortEnd) {
+                    if (rule->dstPortStart <= pkt->id->dst_port &&
+                        pkt->id->dst_port <= rule->dstPortEnd) {
                         BPF_PRINTK("dstPortStart and dstPortEnd matched\n");
                         result++;
                     } else {
@@ -79,7 +82,8 @@ static __always_inline int do_flow_filter_lookup(pkt_info *pkt, struct filter_ke
                 // srcPort matching
                 if ((rule->srcPortStart != 0 && rule->srcPortEnd == 0) || rule->srcPort1 != 0 ||
                     rule->srcPort2 != 0) {
-                    if (rule->srcPortStart == pkt->id->src_port || rule->srcPort1 == pkt->id->src_port ||
+                    if (rule->srcPortStart == pkt->id->src_port ||
+                        rule->srcPort1 == pkt->id->src_port ||
                         rule->srcPort2 == pkt->id->src_port) {
                         BPF_PRINTK("srcPort matched\n");
                         result++;
@@ -88,7 +92,8 @@ static __always_inline int do_flow_filter_lookup(pkt_info *pkt, struct filter_ke
                         goto end;
                     }
                 } else if (rule->srcPortStart != 0 && rule->srcPortEnd != 0) {
-                    if (rule->srcPortStart <= pkt->id->src_port && pkt->id->src_port <= rule->srcPortEnd) {
+                    if (rule->srcPortStart <= pkt->id->src_port &&
+                        pkt->id->src_port <= rule->srcPortEnd) {
                         BPF_PRINTK("srcPortStart and srcPortEnd matched\n");
                         result++;
                     } else {
@@ -99,9 +104,10 @@ static __always_inline int do_flow_filter_lookup(pkt_info *pkt, struct filter_ke
                 // Generic port matching check for either src or dst port
                 if ((rule->portStart != 0 && rule->portEnd == 0) || rule->port1 != 0 ||
                     rule->port2 != 0) {
-                    if (rule->portStart == pkt->id->src_port || rule->portStart == pkt->id->dst_port ||
-                        rule->port1 == pkt->id->src_port || rule->port1 == pkt->id->dst_port ||
-                        rule->port2 == pkt->id->src_port || rule->port2 == pkt->id->dst_port) {
+                    if (rule->portStart == pkt->id->src_port ||
+                        rule->portStart == pkt->id->dst_port || rule->port1 == pkt->id->src_port ||
+                        rule->port1 == pkt->id->dst_port || rule->port2 == pkt->id->src_port ||
+                        rule->port2 == pkt->id->dst_port) {
                         BPF_PRINTK("port matched\n");
                         result++;
                     } else {
@@ -109,8 +115,10 @@ static __always_inline int do_flow_filter_lookup(pkt_info *pkt, struct filter_ke
                         goto end;
                     }
                 } else if (rule->portStart != 0 && rule->portEnd != 0) {
-                    if ((rule->portStart <= pkt->id->src_port && pkt->id->src_port <= rule->portEnd) ||
-                        (rule->portStart <= pkt->id->dst_port && pkt->id->dst_port <= rule->portEnd)) {
+                    if ((rule->portStart <= pkt->id->src_port &&
+                         pkt->id->src_port <= rule->portEnd) ||
+                        (rule->portStart <= pkt->id->dst_port &&
+                         pkt->id->dst_port <= rule->portEnd)) {
                         BPF_PRINTK("portStart and portEnd matched\n");
                         result++;
                     } else {
@@ -234,8 +242,7 @@ static __always_inline int flow_filter_setup_lookup_key(pkt_info *pkt, struct fi
 /*
  * check if the flow match filter rule and return >= 1 if the flow is to be dropped
  */
-static __always_inline int is_flow_filtered(pkt_info *pkt, filter_action *action,
-                                            u32 drop_reason) {
+static __always_inline int is_flow_filtered(pkt_info *pkt, filter_action *action, u32 drop_reason) {
     struct filter_key_t key;
     u8 len, offset;
     int result = 0;
