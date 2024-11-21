@@ -65,6 +65,18 @@ func TestPBFlowToMap(t *testing.T) {
 		DnsFlags:               0x80,
 		DnsErrno:               0,
 		TimeFlowRtt:            durationpb.New(someDuration),
+		Xlat: &pbflow.Xlat{
+			SrcAddr: &pbflow.IP{
+				IpFamily: &pbflow.IP_Ipv4{Ipv4: 0x0},
+			},
+			DstAddr: &pbflow.IP{
+				IpFamily: &pbflow.IP_Ipv4{Ipv4: 0x0},
+			},
+			SrcPort: 0,
+			DstPort: 0,
+			ZoneId:  100,
+			UdnId:   "udn",
+		},
 	}
 
 	out := PBFlowToMap(flow)
@@ -99,6 +111,13 @@ func TestPBFlowToMap(t *testing.T) {
 		"DnsFlagsResponseCode":   "NoError",
 		"DnsErrno":               uint8(0),
 		"TimeFlowRttNs":          someDuration.Nanoseconds(),
+		"XlatSrcAddr":            "0.0.0.0",
+		"XlatDstAddr":            "0.0.0.0",
+		"XlatSrcPort":            uint16(0),
+		"XlatDstPort":            uint16(0),
+		"ZoneId":                 uint16(100),
+		"UdnId":                  "udn",
+		"XlatIcmpId":             uint8(0),
 	}, out)
 
 }

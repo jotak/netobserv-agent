@@ -51,6 +51,7 @@ type Record struct {
 	// Calculated RTT which is set when record is created by calling NewRecord
 	TimeFlowRtt            time.Duration
 	NetworkMonitorEventsMD []string
+	UdnID                  string
 }
 
 func NewRecord(
@@ -137,6 +138,10 @@ func Accumulate(r *ebpf.BpfFlowMetrics, src *ebpf.BpfFlowMetrics) {
 			copy(r.NetworkEvents[r.NetworkEventsIdx][:], md[:])
 			r.NetworkEventsIdx = (r.NetworkEventsIdx + 1) % maxNetworkEvents
 		}
+	}
+
+	if src.TranslatedFlow.ZoneId != 0 {
+		r.TranslatedFlow = src.TranslatedFlow
 	}
 }
 

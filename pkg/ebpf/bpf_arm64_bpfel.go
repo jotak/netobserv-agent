@@ -108,6 +108,7 @@ type BpfFlowMetricsT struct {
 	FlowRtt          uint64
 	NetworkEventsIdx uint8
 	NetworkEvents    [4][8]uint8
+	TranslatedFlow   BpfTranslatedFlowT
 }
 
 type BpfFlowRecordT struct {
@@ -173,6 +174,15 @@ const (
 	BpfTcpFlagsTRST_ACK_FLAG BpfTcpFlagsT = 1024
 )
 
+type BpfTranslatedFlowT struct {
+	Saddr  [16]uint8
+	Daddr  [16]uint8
+	Sport  uint16
+	Dport  uint16
+	ZoneId uint16
+	IcmpId uint8
+}
+
 // LoadBpf returns the embedded CollectionSpec for Bpf.
 func LoadBpf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_BpfBytes)
@@ -226,6 +236,7 @@ type BpfProgramSpecs struct {
 	TcxEgressPcaParse         *ebpf.ProgramSpec `ebpf:"tcx_egress_pca_parse"`
 	TcxIngressFlowParse       *ebpf.ProgramSpec `ebpf:"tcx_ingress_flow_parse"`
 	TcxIngressPcaParse        *ebpf.ProgramSpec `ebpf:"tcx_ingress_pca_parse"`
+	TrackNatManipPkt          *ebpf.ProgramSpec `ebpf:"track_nat_manip_pkt"`
 }
 
 // BpfMapSpecs contains maps before they are loaded into the kernel.
@@ -297,6 +308,7 @@ type BpfPrograms struct {
 	TcxEgressPcaParse         *ebpf.Program `ebpf:"tcx_egress_pca_parse"`
 	TcxIngressFlowParse       *ebpf.Program `ebpf:"tcx_ingress_flow_parse"`
 	TcxIngressPcaParse        *ebpf.Program `ebpf:"tcx_ingress_pca_parse"`
+	TrackNatManipPkt          *ebpf.Program `ebpf:"track_nat_manip_pkt"`
 }
 
 func (p *BpfPrograms) Close() error {
@@ -313,6 +325,7 @@ func (p *BpfPrograms) Close() error {
 		p.TcxEgressPcaParse,
 		p.TcxIngressFlowParse,
 		p.TcxIngressPcaParse,
+		p.TrackNatManipPkt,
 	)
 }
 

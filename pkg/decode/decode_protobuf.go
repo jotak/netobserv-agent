@@ -147,6 +147,16 @@ func RecordToMap(fr *model.Record) config.GenericMap {
 		}
 		out["NetworkEvents"] = metadata
 	}
+
+	if fr.Metrics.TranslatedFlow.ZoneId != 0 && len(fr.UdnID) != 0 {
+		out["ZoneId"] = fr.Metrics.TranslatedFlow.ZoneId
+		out["XlatSrcPort"] = fr.Metrics.TranslatedFlow.Sport
+		out["XlatDstPort"] = fr.Metrics.TranslatedFlow.Dport
+		out["XlatSrcAddr"] = model.IP(fr.Metrics.TranslatedFlow.Saddr).String()
+		out["XlatDstAddr"] = model.IP(fr.Metrics.TranslatedFlow.Daddr).String()
+		out["XlatIcmpId"] = fr.Metrics.TranslatedFlow.IcmpId
+		out["UdnId"] = fr.UdnID
+	}
 	return out
 }
 

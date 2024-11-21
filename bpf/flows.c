@@ -52,6 +52,11 @@
 #include "network_events_monitoring.h"
 
 /*
+ * Defines packets transformation tracker
+ */
+#include "pkt_transformation.h"
+
+/*
  * De-duplication logic
  */
 #include "dedup.h"
