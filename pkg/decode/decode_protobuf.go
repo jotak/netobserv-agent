@@ -82,18 +82,20 @@ func RecordToMap(fr *model.Record) config.GenericMap {
 	}
 	out["Interfaces"] = fr.Interfaces
 	out["IfDirections"] = directions
-	if fr.Metrics.NbObservedSrcIps > 0 {
+	if fr.Metrics.NbObservedSrc > 0 {
+		// TODO: port
 		var srcIPs []string
-		for i := uint8(0); i < fr.Metrics.NbObservedSrcIps; i++ {
-			var ip net.IP = fr.Metrics.ObservedSrcIps[i][:]
+		for i := uint8(0); i < fr.Metrics.NbObservedSrc; i++ {
+			var ip net.IP = fr.Metrics.ObservedSrc[i].Addr[:]
 			srcIPs = append(srcIPs, ip.String())
 		}
 		out["AdditionalSrcAddr"] = srcIPs
 	}
-	if fr.Metrics.NbObservedDstIps > 0 {
+	if fr.Metrics.NbObservedDst > 0 {
+		// TODO: port
 		var dstIPs []string
-		for i := uint8(0); i < fr.Metrics.NbObservedDstIps; i++ {
-			var ip net.IP = fr.Metrics.ObservedDstIps[i][:]
+		for i := uint8(0); i < fr.Metrics.NbObservedDst; i++ {
+			var ip net.IP = fr.Metrics.ObservedDst[i].Addr[:]
 			dstIPs = append(dstIPs, ip.String())
 		}
 		out["AdditionalDstAddr"] = dstIPs
@@ -148,13 +150,10 @@ func RecordToMap(fr *model.Record) config.GenericMap {
 		out["NetworkEvents"] = metadata
 	}
 
-	if fr.Metrics.TranslatedFlow.ZoneId != 0 && len(fr.UdnID) != 0 {
-		out["ZoneId"] = fr.Metrics.TranslatedFlow.ZoneId
-		out["XlatSrcPort"] = fr.Metrics.TranslatedFlow.Sport
-		out["XlatDstPort"] = fr.Metrics.TranslatedFlow.Dport
-		out["XlatSrcAddr"] = model.IP(fr.Metrics.TranslatedFlow.Saddr).String()
-		out["XlatDstAddr"] = model.IP(fr.Metrics.TranslatedFlow.Daddr).String()
-		out["XlatIcmpId"] = fr.Metrics.TranslatedFlow.IcmpId
+	if fr.Metrics.ZoneId != 0 {
+		out["ZoneId"] = fr.Metrics.ZoneId
+	}
+	if len(fr.UdnID) != 0 {
 		out["UdnId"] = fr.UdnID
 	}
 	return out

@@ -12,6 +12,7 @@ import (
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/ifaces"
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/kernel"
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/metrics"
+	"github.com/netobserv/netobserv-ebpf-agent/pkg/model"
 	"github.com/prometheus/client_golang/prometheus"
 
 	cilium "github.com/cilium/ebpf"
@@ -752,7 +753,7 @@ func (m *FlowFetcher) ReadRingBuf() (ringbuf.Record, error) {
 // LookupAndDeleteMap reads all the entries from the eBPF map and removes them from it.
 // TODO: detect whether BatchLookupAndDelete is supported (Kernel>=5.6) and use it selectively
 // Supported Lookup/Delete operations by kernel: https://github.com/iovisor/bcc/blob/master/docs/kernel-versions.md
-func (m *FlowFetcher) LookupAndDeleteMap(met *metrics.Metrics) map[ebpf.BpfFlowId][]ebpf.BpfFlowMetrics {
+func (m *FlowFetcher) LookupAndDeleteMap(met *metrics.Metrics) map[ebpf.BpfFlowId]model.BpfFlowPayload {
 	if !m.lookupAndDeleteSupported {
 		return m.legacyLookupAndDeleteMap(met)
 	}
@@ -760,13 +761,15 @@ func (m *FlowFetcher) LookupAndDeleteMap(met *metrics.Metrics) map[ebpf.BpfFlowI
 	flowMap := m.objects.AggregatedFlows
 
 	iterator := flowMap.Iterate()
-	var flows = make(map[ebpf.BpfFlowId][]ebpf.BpfFlowMetrics, m.cacheMaxSize)
+	var flows = make(map[ebpf.BpfFlowId]model.BpfFlowPayload, m.cacheMaxSize)
 	var ids []ebpf.BpfFlowId
 	var id ebpf.BpfFlowId
-	var metrics []ebpf.BpfFlowMetrics
+	var baseMetrics []ebpf.BpfFlowMetrics
+	var additionalMetrics []ebpf.BpfAdditionalMetrics
+	var observations []ebpf.BpfObservations
 
 	// First, get all ids and don't care about metrics (we need lookup+delete to be atomic)
-	for iterator.Next(&id, &metrics) {
+	for iterator.Next(&id, &baseMetrics) {
 		ids = append(ids, id)
 	}
 
@@ -774,17 +777,45 @@ func (m *FlowFetcher) LookupAndDeleteMap(met *metrics.Metrics) map[ebpf.BpfFlowI
 	// Run the atomic Lookup+Delete; if new ids have been inserted in the meantime, they'll be fetched next time
 	for i, id := range ids {
 		count++
-		if err := flowMap.LookupAndDelete(&id, &metrics); err != nil {
+		if err := flowMap.LookupAndDelete(&id, &baseMetrics); err != nil {
 			if i == 0 && errors.Is(err, cilium.ErrNotSupported) {
 				log.WithError(err).Warnf("switching to legacy mode")
 				m.lookupAndDeleteSupported = false
 				return m.legacyLookupAndDeleteMap(met)
 			}
-			log.WithError(err).WithField("flowId", id).Warnf("couldn't delete flow entry")
+			log.WithError(err).WithField("flowId", id).Warnf("couldn't lookup/delete flow entry")
 			met.Errors.WithErrorName("flow-fetcher", "CannotDeleteFlows").Inc()
 			continue
 		}
-		flows[id] = metrics
+		flowPayload := model.BpfFlowPayload{}
+		for _, bm := range baseMetrics {
+			flowPayload.AccumulateBase(&bm)
+		}
+		// Fetch observations
+		if err := m.objects.FlowObservations.LookupAndDelete(&id, &observations); err != nil {
+			log.WithError(err).WithField("flowId", id).Warnf("couldn't lookup/delete observation entry")
+			met.Errors.WithErrorName("flow-fetcher", "CannotDeleteObs").Inc()
+		}
+		for iobs := range observations {
+			flowPayload.AccumulateObservation(&observations[iobs])
+		}
+
+		// TODO
+		// Index observations (ie. "duplicates") to allow retrieving main flow for additional metrics
+		// That's because additional metrics are provided from other hooks which may not have been able to pick up the "master" flow in kernel
+		// So we need an additional correlation step here
+
+		// Fetch additional metrics
+		// TODO: this should use the indexed observations mentioned above, rather than the "master" id, which likely will point to nothing
+		if err := m.objects.AdditionalFlowMetrics.LookupAndDelete(&id, &additionalMetrics); err != nil {
+			log.WithError(err).WithField("flowId", id).Warnf("couldn't lookup/delete additional metrics entry")
+			met.Errors.WithErrorName("flow-fetcher", "CannotDeleteAdditionalMetric").Inc()
+		}
+		for _, a := range additionalMetrics {
+			flowPayload.AccumulateAdditional(&a)
+		}
+
+		flows[id] = flowPayload
 	}
 	met.BufferSizeGauge.WithBufferName("hashmap-total").Set(float64(count))
 	met.BufferSizeGauge.WithBufferName("hashmap-unique").Set(float64(len(flows)))

@@ -31,7 +31,7 @@ func TestProtoConversion(t *testing.T) {
 	input := make(chan []*model.Record, 11)
 	record := model.Record{}
 	record.Metrics.EthProtocol = 3
-	record.Metrics.ObservedIntf = [4]ebpf.BpfPktObservationT{{Direction: 1}}
+	record.Metrics.ObservedIntf = [model.MaxObservedInterfaces]ebpf.BpfObservedIntfT{{Direction: 1}}
 	record.Metrics.SrcMac = [...]byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
 	record.Metrics.DstMac = [...]byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66}
 	record.Id.SrcIp = model.IPAddrFromNetIP(net.ParseIP("192.1.2.3"))
@@ -79,7 +79,7 @@ func TestProtoConversion(t *testing.T) {
 func TestIdenticalKeys(t *testing.T) {
 	record := model.Record{}
 	record.Metrics.EthProtocol = 3
-	record.Metrics.ObservedIntf = [4]ebpf.BpfPktObservationT{{Direction: 1}}
+	record.Metrics.ObservedIntf = [model.MaxObservedInterfaces]ebpf.BpfObservedIntfT{{Direction: 1}}
 	record.Metrics.SrcMac = [...]byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
 	record.Metrics.DstMac = [...]byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66}
 	record.Id.SrcIp = model.IPAddrFromNetIP(net.ParseIP("192.1.2.3"))

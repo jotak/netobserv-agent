@@ -10,6 +10,7 @@ import (
 	test2 "github.com/mariomac/guara/pkg/test"
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/ebpf"
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/metrics"
+	"github.com/netobserv/netobserv-ebpf-agent/pkg/model"
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -52,8 +53,8 @@ var (
 		SrcPort: 333,
 		DstPort: 532,
 	}
-	obsByIf3 = [4]ebpf.BpfPktObservationT{{IfIndex: 3, Direction: 0}}
-	obsByIf4 = [4]ebpf.BpfPktObservationT{{IfIndex: 4, Direction: 1}}
+	obsByIf3 = [model.MaxObservedInterfaces]ebpf.BpfObservedIntfT{{IfIndex: 3, Direction: 0}}
+	obsByIf4 = [model.MaxObservedInterfaces]ebpf.BpfObservedIntfT{{IfIndex: 4, Direction: 1}}
 )
 
 func TestFlowsAgent_Decoration(t *testing.T) {
@@ -69,7 +70,7 @@ func TestFlowsAgent_Decoration(t *testing.T) {
 	// add the interface name and the agent IP
 	for _, f := range exported {
 		assert.Equal(t, agentIP, f.AgentIP.String())
-		switch f.Id {
+		switch *f.Id {
 		case key1, key2:
 			assert.Equal(t, "foo", f.Interfaces[0])
 		default:
@@ -98,16 +99,25 @@ func testAgent(t *testing.T, cfg *Config) *test.ExporterFake {
 	})
 
 	now := uint64(monotime.Now())
-	key1Metrics := []ebpf.BpfFlowMetrics{
-		{Packets: 3, Bytes: 44, StartMonoTimeTs: now + 1000, EndMonoTimeTs: now + 1_000_000_000, NbObservedIntf: 1, ObservedIntf: obsByIf3},
-		{Packets: 1, Bytes: 22, StartMonoTimeTs: now, EndMonoTimeTs: now + 3000, NbObservedIntf: 1, ObservedIntf: obsByIf4},
+	key1Metrics := model.BpfFlowPayloads{
+		{
+			BpfFlowMetrics:  &ebpf.BpfFlowMetrics{Packets: 3, Bytes: 44, StartMonoTimeTs: now + 1000, EndMonoTimeTs: now + 1_000_000_000},
+			BpfObservations: &ebpf.BpfObservations{NbObservedIntf: 1, ObservedIntf: obsByIf3},
+		},
+		{
+			BpfFlowMetrics:  &ebpf.BpfFlowMetrics{Packets: 1, Bytes: 22, StartMonoTimeTs: now, EndMonoTimeTs: now + 3000},
+			BpfObservations: &ebpf.BpfObservations{NbObservedIntf: 1, ObservedIntf: obsByIf4},
+		},
 	}
-	key2Metrics := []ebpf.BpfFlowMetrics{
-		{Packets: 7, Bytes: 33, StartMonoTimeTs: now, EndMonoTimeTs: now + 2_000_000_000, NbObservedIntf: 1, ObservedIntf: obsByIf3},
+	key2Metrics := model.BpfFlowPayloads{
+		{
+			BpfFlowMetrics:  &ebpf.BpfFlowMetrics{Packets: 7, Bytes: 33, StartMonoTimeTs: now, EndMonoTimeTs: now + 2_000_000_000},
+			BpfObservations: &ebpf.BpfObservations{NbObservedIntf: 1, ObservedIntf: obsByIf3},
+		},
 	}
-	ebpfTracer.AppendLookupResults(map[ebpf.BpfFlowId][]ebpf.BpfFlowMetrics{
-		key1: key1Metrics,
-		key2: key2Metrics,
+	ebpfTracer.AppendLookupResults(map[ebpf.BpfFlowId]model.BpfFlowPayload{
+		key1: key1Metrics.Accumulate(),
+		key2: key2Metrics.Accumulate(),
 	})
 	return export
 }

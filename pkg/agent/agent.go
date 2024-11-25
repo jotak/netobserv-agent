@@ -137,7 +137,7 @@ type ebpfFlowFetcher interface {
 	AttachTCX(iface ifaces.Interface) error
 	DetachTCX(iface ifaces.Interface) error
 
-	LookupAndDeleteMap(*metrics.Metrics) map[ebpf.BpfFlowId][]ebpf.BpfFlowMetrics
+	LookupAndDeleteMap(*metrics.Metrics) map[ebpf.BpfFlowId]model.BpfFlowPayload
 	DeleteMapsStaleEntries(timeOut time.Duration)
 	ReadRingBuf() (ringbuf.Record, error)
 }

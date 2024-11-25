@@ -22,7 +22,9 @@ const MacLen = 6
 const (
 	IPv6Type                 = 0x86DD
 	networkEventsMaxEventsMD = 8
-	maxNetworkEvents         = 4
+	MaxNetworkEvents         = 4
+	MaxObservedIPs           = 3
+	MaxObservedInterfaces    = 4
 )
 
 type HumanBytes uint64
@@ -40,7 +42,9 @@ type RawRecord ebpf.BpfFlowRecordT
 
 // Record contains accumulated metrics from a flow
 type Record struct {
-	RawRecord
+	Id      *ebpf.BpfFlowId
+	Metrics *BpfFlowPayload
+
 	// TODO: redundant field from RecordMetrics. Reorganize structs
 	TimeFlowStart time.Time
 	TimeFlowEnd   time.Time
@@ -55,8 +59,8 @@ type Record struct {
 }
 
 func NewRecord(
-	key ebpf.BpfFlowId,
-	metrics *ebpf.BpfFlowMetrics,
+	key *ebpf.BpfFlowId,
+	metrics *BpfFlowPayload,
 	currentTime time.Time,
 	monotonicCurrentTime uint64,
 ) *Record {
@@ -64,10 +68,8 @@ func NewRecord(
 	endDelta := time.Duration(monotonicCurrentTime - metrics.EndMonoTimeTs)
 
 	var record = Record{
-		RawRecord: RawRecord{
-			Id:      key,
-			Metrics: *metrics,
-		},
+		Id:            key,
+		Metrics:       metrics,
 		TimeFlowStart: currentTime.Add(-startDelta),
 		TimeFlowEnd:   currentTime.Add(-endDelta),
 	}
@@ -81,7 +83,7 @@ func NewRecord(
 	return &record
 }
 
-func Accumulate(r *ebpf.BpfFlowMetrics, src *ebpf.BpfFlowMetrics) {
+func AccumulateBaseMetrics(r *ebpf.BpfFlowMetrics, src *ebpf.BpfFlowMetrics) {
 	// time == 0 if the value has not been yet set
 	if r.StartMonoTimeTs == 0 || (r.StartMonoTimeTs > src.StartMonoTimeTs && src.StartMonoTimeTs != 0) {
 		r.StartMonoTimeTs = src.StartMonoTimeTs
@@ -95,23 +97,11 @@ func Accumulate(r *ebpf.BpfFlowMetrics, src *ebpf.BpfFlowMetrics) {
 	if src.EthProtocol != 0 {
 		r.EthProtocol = src.EthProtocol
 	}
-	// Accumulate interfaces + directions
-	accumulateInterfaces(&r.NbObservedIntf, &r.ObservedIntf, src.NbObservedIntf, src.ObservedIntf)
-	// Accumulate additional IPs
-	accumulateIPs(&r.NbObservedSrcIps, &r.ObservedSrcIps, src.NbObservedSrcIps, src.ObservedSrcIps)
-	accumulateIPs(&r.NbObservedDstIps, &r.ObservedDstIps, src.NbObservedDstIps, src.ObservedDstIps)
 	if allZero(r.SrcMac) {
 		r.SrcMac = src.SrcMac
 	}
 	if allZero(r.DstMac) {
 		r.DstMac = src.DstMac
-	}
-	// Accumulate Drop statistics
-	r.PktDrops.Bytes += src.PktDrops.Bytes
-	r.PktDrops.Packets += src.PktDrops.Packets
-	r.PktDrops.LatestFlags |= src.PktDrops.LatestFlags
-	if src.PktDrops.LatestDropCause != 0 {
-		r.PktDrops.LatestDropCause = src.PktDrops.LatestDropCause
 	}
 	// Accumulate DNS
 	r.DnsRecord.Flags |= src.DnsRecord.Flags
@@ -124,28 +114,16 @@ func Accumulate(r *ebpf.BpfFlowMetrics, src *ebpf.BpfFlowMetrics) {
 	if r.DnsRecord.Latency < src.DnsRecord.Latency {
 		r.DnsRecord.Latency = src.DnsRecord.Latency
 	}
-	// Accumulate RTT
-	if r.FlowRtt < src.FlowRtt {
-		r.FlowRtt = src.FlowRtt
-	}
 	// Accumulate DSCP
 	if src.Dscp != 0 {
 		r.Dscp = src.Dscp
 	}
-
-	for _, md := range src.NetworkEvents {
-		if !AllZerosMetaData(md) && !networkEventsMDExist(r.NetworkEvents, md) {
-			copy(r.NetworkEvents[r.NetworkEventsIdx][:], md[:])
-			r.NetworkEventsIdx = (r.NetworkEventsIdx + 1) % maxNetworkEvents
-		}
-	}
-
-	if src.TranslatedFlow.ZoneId != 0 {
-		r.TranslatedFlow = src.TranslatedFlow
+	if src.ZoneId != 0 {
+		r.ZoneId = src.ZoneId
 	}
 }
 
-func networkEventsMDExist(events [maxNetworkEvents][networkEventsMaxEventsMD]uint8, md [networkEventsMaxEventsMD]uint8) bool {
+func networkEventsMDExist(events [MaxNetworkEvents][networkEventsMaxEventsMD]uint8, md [networkEventsMaxEventsMD]uint8) bool {
 	for _, e := range events {
 		// TODO: use uint8Equals, more performant?
 		if reflect.DeepEqual(e, md) {
@@ -155,7 +133,7 @@ func networkEventsMDExist(events [maxNetworkEvents][networkEventsMaxEventsMD]uin
 	return false
 }
 
-func accumulateInterfaces(dstSize *uint8, dstIntf *[4]ebpf.BpfPktObservationT, srcSize uint8, srcIntf [4]ebpf.BpfPktObservationT) {
+func accumulateInterfaces(dstSize *uint8, dstIntf *[MaxObservedInterfaces]ebpf.BpfObservedIntfT, srcSize uint8, srcIntf [MaxObservedInterfaces]ebpf.BpfObservedIntfT) {
 	iObs := uint8(0)
 outer:
 	for *dstSize < uint8(len(dstIntf)) && iObs < srcSize {
@@ -173,18 +151,18 @@ outer:
 	}
 }
 
-func accumulateIPs(dstSize *uint8, dstIPs *[4][4]uint8, srcSize uint8, srcIPs [4][4]uint8) {
+func accumulateIPPorts(dstSize *uint8, dstIPPorts *[MaxObservedIPs]ebpf.BpfIpPortT, srcSize uint8, srcIPPorts [MaxObservedIPs]ebpf.BpfIpPortT) {
 	iObs := uint8(0)
 outer:
-	for *dstSize < uint8(len(*dstIPs)) && iObs < srcSize {
+	for *dstSize < uint8(len(*dstIPPorts)) && iObs < srcSize {
 		for u := uint8(0); u < *dstSize; u++ {
-			if uint8Equals(dstIPs[u][:], srcIPs[iObs][:]) {
+			if uint8Equals(dstIPPorts[u].Addr[:], srcIPPorts[iObs].Addr[:]) {
 				// Ignore if already exists
 				iObs++
 				continue outer
 			}
 		}
-		dstIPs[*dstSize] = srcIPs[iObs]
+		dstIPPorts[*dstSize] = srcIPPorts[iObs]
 		*dstSize++
 		iObs++
 	}

@@ -74,12 +74,7 @@ func FlowToPB(fr *model.Record, s *ovnobserv.SampleDecoder) *Record {
 		DnsFlags:               uint32(fr.Metrics.DnsRecord.Flags),
 		DnsErrno:               uint32(fr.Metrics.DnsRecord.Errno),
 		TimeFlowRtt:            durationpb.New(fr.TimeFlowRtt),
-		Xlat: &Xlat{
-			SrcPort: uint32(fr.Metrics.TranslatedFlow.Sport),
-			DstPort: uint32(fr.Metrics.TranslatedFlow.Dport),
-			ZoneId:  uint32(fr.Metrics.TranslatedFlow.ZoneId),
-			IcmpId:  uint32(fr.Metrics.TranslatedFlow.IcmpId),
-		},
+		ZoneId:                 uint32(fr.Metrics.ZoneId),
 	}
 	if fr.Metrics.DnsRecord.Latency != 0 {
 		pbflowRecord.DnsLatency = durationpb.New(fr.DNSLatency)
@@ -98,30 +93,26 @@ func FlowToPB(fr *model.Record, s *ovnobserv.SampleDecoder) *Record {
 			})
 		}
 	}
-	if fr.Metrics.NbObservedSrcIps > 0 {
+	if fr.Metrics.NbObservedSrc > 0 {
 		pbflowRecord.AdditionalSrcAddr = make([]*IP, 0)
-		for i := 0; i < int(fr.Metrics.NbObservedSrcIps); i++ {
-			ip := &IP{IpFamily: &IP_Ipv4{Ipv4: binary.BigEndian.Uint32(fr.Metrics.ObservedSrcIps[i][:])}}
+		for i := 0; i < int(fr.Metrics.NbObservedSrc); i++ {
+			ip := &IP{IpFamily: &IP_Ipv4{Ipv4: binary.BigEndian.Uint32(fr.Metrics.ObservedSrc[i].Addr[:])}}
 			pbflowRecord.AdditionalSrcAddr = append(pbflowRecord.AdditionalSrcAddr, ip)
 		}
 	}
-	if fr.Metrics.NbObservedDstIps > 0 {
+	if fr.Metrics.NbObservedDst > 0 {
 		pbflowRecord.AdditionalDstAddr = make([]*IP, 0)
-		for i := 0; i < int(fr.Metrics.NbObservedDstIps); i++ {
-			ip := &IP{IpFamily: &IP_Ipv4{Ipv4: binary.BigEndian.Uint32(fr.Metrics.ObservedDstIps[i][:])}}
+		for i := 0; i < int(fr.Metrics.NbObservedDst); i++ {
+			ip := &IP{IpFamily: &IP_Ipv4{Ipv4: binary.BigEndian.Uint32(fr.Metrics.ObservedDst[i].Addr[:])}}
 			pbflowRecord.AdditionalDstAddr = append(pbflowRecord.AdditionalDstAddr, ip)
 		}
 	}
 	if fr.Metrics.EthProtocol == model.IPv6Type {
 		pbflowRecord.Network.SrcAddr = &IP{IpFamily: &IP_Ipv6{Ipv6: fr.Id.SrcIp[:]}}
 		pbflowRecord.Network.DstAddr = &IP{IpFamily: &IP_Ipv6{Ipv6: fr.Id.DstIp[:]}}
-		pbflowRecord.Xlat.SrcAddr = &IP{IpFamily: &IP_Ipv6{Ipv6: fr.Metrics.TranslatedFlow.Saddr[:]}}
-		pbflowRecord.Xlat.DstAddr = &IP{IpFamily: &IP_Ipv6{Ipv6: fr.Metrics.TranslatedFlow.Daddr[:]}}
 	} else {
 		pbflowRecord.Network.SrcAddr = &IP{IpFamily: &IP_Ipv4{Ipv4: model.IntEncodeV4(fr.Id.SrcIp)}}
 		pbflowRecord.Network.DstAddr = &IP{IpFamily: &IP_Ipv4{Ipv4: model.IntEncodeV4(fr.Id.DstIp)}}
-		pbflowRecord.Xlat.SrcAddr = &IP{IpFamily: &IP_Ipv4{Ipv4: model.IntEncodeV4(fr.Metrics.TranslatedFlow.Saddr)}}
-		pbflowRecord.Xlat.DstAddr = &IP{IpFamily: &IP_Ipv4{Ipv4: model.IntEncodeV4(fr.Metrics.TranslatedFlow.Daddr)}}
 	}
 	if s != nil {
 		seen := make(map[string]bool)
@@ -142,11 +133,11 @@ func FlowToPB(fr *model.Record, s *ovnobserv.SampleDecoder) *Record {
 		if err != nil {
 			protoLog.Errorf("unable to get zoneIDtoUdnIdMap: %v", err)
 		} else {
-			if udnID, ok := zoneIDtoUdnIDMap[fmt.Sprint(fr.Metrics.TranslatedFlow.ZoneId)]; ok {
-				pbflowRecord.Xlat.UdnId = udnID
-				protoLog.Debugf("Packet Xlation zoneID %d mapped to udnID %s", fr.Metrics.TranslatedFlow.ZoneId, udnID)
+			if udnID, ok := zoneIDtoUdnIDMap[fmt.Sprint(fr.Metrics.ZoneId)]; ok {
+				pbflowRecord.UdnId = udnID
+				protoLog.Debugf("Packet Xlation zoneID %d mapped to udnID %s", fr.Metrics.ZoneId, udnID)
 			} else {
-				protoLog.Errorf("unable to find zoneId %d in ZoneID2UdnID map", fr.Metrics.TranslatedFlow.ZoneId)
+				protoLog.Errorf("unable to find zoneId %d in ZoneID2UdnID map", fr.Metrics.ZoneId)
 			}
 		}
 	}
@@ -158,17 +149,17 @@ func PBToFlow(pb *Record) *model.Record {
 		return nil
 	}
 	out := model.Record{
-		RawRecord: model.RawRecord{
-			Id: ebpf.BpfFlowId{
-				TransportProtocol: uint8(pb.Transport.Protocol),
-				SrcIp:             ipToIPAddr(pb.Network.GetSrcAddr()),
-				DstIp:             ipToIPAddr(pb.Network.GetDstAddr()),
-				SrcPort:           uint16(pb.Transport.SrcPort),
-				DstPort:           uint16(pb.Transport.DstPort),
-				IcmpType:          uint8(pb.IcmpType),
-				IcmpCode:          uint8(pb.IcmpCode),
-			},
-			Metrics: ebpf.BpfFlowMetrics{
+		Id: &ebpf.BpfFlowId{
+			TransportProtocol: uint8(pb.Transport.Protocol),
+			SrcIp:             ipToIPAddr(pb.Network.GetSrcAddr()),
+			DstIp:             ipToIPAddr(pb.Network.GetDstAddr()),
+			SrcPort:           uint16(pb.Transport.SrcPort),
+			DstPort:           uint16(pb.Transport.DstPort),
+			IcmpType:          uint8(pb.IcmpType),
+			IcmpCode:          uint8(pb.IcmpCode),
+		},
+		Metrics: &model.BpfFlowPayload{
+			BpfFlowMetrics: &ebpf.BpfFlowMetrics{
 				EthProtocol: uint16(pb.EthProtocol),
 				SrcMac:      macToUint8(pb.DataLink.GetSrcMac()),
 				DstMac:      macToUint8(pb.DataLink.GetDstMac()),
@@ -176,26 +167,21 @@ func PBToFlow(pb *Record) *model.Record {
 				Packets:     uint32(pb.Packets),
 				Flags:       uint16(pb.Flags),
 				Dscp:        uint8(pb.Network.Dscp),
-				PktDrops: ebpf.BpfPktDropsT{
-					Bytes:           pb.PktDropBytes,
-					Packets:         uint32(pb.PktDropPackets),
-					LatestFlags:     uint16(pb.PktDropLatestFlags),
-					LatestState:     uint8(pb.PktDropLatestState),
-					LatestDropCause: pb.PktDropLatestDropCause,
-				},
 				DnsRecord: ebpf.BpfDnsRecordT{
 					Id:      uint16(pb.DnsId),
 					Flags:   uint16(pb.DnsFlags),
 					Errno:   uint8(pb.DnsErrno),
 					Latency: uint64(pb.DnsLatency.AsDuration()),
 				},
-				TranslatedFlow: ebpf.BpfTranslatedFlowT{
-					Saddr:  ipToIPAddr(pb.Xlat.GetSrcAddr()),
-					Daddr:  ipToIPAddr(pb.Xlat.GetDstAddr()),
-					Sport:  uint16(pb.Xlat.GetSrcPort()),
-					Dport:  uint16(pb.Xlat.GetDstPort()),
-					ZoneId: uint16(pb.Xlat.GetZoneId()),
-					IcmpId: uint8(pb.Xlat.GetIcmpId()),
+				ZoneId: uint16(pb.GetZoneId()),
+			},
+			BpfAdditionalMetrics: &ebpf.BpfAdditionalMetrics{
+				PktDrops: ebpf.BpfPktDropsT{
+					Bytes:           pb.PktDropBytes,
+					Packets:         uint32(pb.PktDropPackets),
+					LatestFlags:     uint16(pb.PktDropLatestFlags),
+					LatestState:     uint8(pb.PktDropLatestState),
+					LatestDropCause: pb.PktDropLatestDropCause,
 				},
 			},
 		},
@@ -210,28 +196,25 @@ func PBToFlow(pb *Record) *model.Record {
 	for i, entry := range pb.GetDupList() {
 		intf := entry.Interface
 		dir := uint8(entry.Direction)
-		out.Metrics.ObservedIntf[i] = ebpf.BpfPktObservationT{Direction: dir}
+		out.Metrics.ObservedIntf[i] = ebpf.BpfObservedIntfT{Direction: dir}
 		out.Interfaces = append(out.Interfaces, intf)
 	}
-	out.Metrics.NbObservedSrcIps = uint8(len(pb.GetAdditionalSrcAddr()))
+	// TODO: manage port
+	out.Metrics.NbObservedSrc = uint8(len(pb.GetAdditionalSrcAddr()))
 	for i, ip := range pb.GetAdditionalSrcAddr() {
-		b := make([]byte, 4)
-		binary.BigEndian.PutUint32(b, ip.GetIpv4())
-		out.Metrics.ObservedSrcIps[i] = [4]uint8(b)
+		out.Metrics.ObservedSrc[i].Addr = ipToIPAddr(ip)
 	}
-	out.Metrics.NbObservedDstIps = uint8(len(pb.GetAdditionalDstAddr()))
+	out.Metrics.NbObservedDst = uint8(len(pb.GetAdditionalDstAddr()))
 	for i, ip := range pb.GetAdditionalDstAddr() {
-		b := make([]byte, 4)
-		binary.BigEndian.PutUint32(b, ip.GetIpv4())
-		out.Metrics.ObservedDstIps[i] = [4]uint8(b)
+		out.Metrics.ObservedDst[i].Addr = ipToIPAddr(ip)
 	}
 	if len(pb.GetNetworkEventsMetadata()) != 0 {
 		out.NetworkMonitorEventsMD = append(out.NetworkMonitorEventsMD, pb.GetNetworkEventsMetadata()...)
 		protoLog.Debugf("decoded Network events monitor metadata: %v", out.NetworkMonitorEventsMD)
 	}
 
-	if len(pb.GetXlat().UdnId) != 0 {
-		out.UdnID = pb.GetXlat().UdnId
+	if len(pb.UdnId) != 0 {
+		out.UdnID = pb.UdnId
 	}
 	return &out
 }

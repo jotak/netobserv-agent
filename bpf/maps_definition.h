@@ -26,6 +26,24 @@ struct {
     __uint(map_flags, BPF_F_NO_PREALLOC);
 } aggregated_flows SEC(".maps");
 
+// Key: the flow identifier. Value: extra metrics for that identifier.
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+    __type(key, flow_id);
+    __type(value, additional_metrics);
+    __uint(max_entries, 1 << 24);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+} additional_flow_metrics SEC(".maps");
+
+// Key: the flow identifier. Value: other observed flow ids for that main identifier.
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+    __type(key, flow_id);
+    __type(value, observations);
+    __uint(max_entries, 1 << 24);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+} flow_observations SEC(".maps");
+
 //PerfEvent Array for Packet Payloads
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);

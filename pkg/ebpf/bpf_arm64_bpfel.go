@@ -12,6 +12,15 @@ import (
 	"github.com/cilium/ebpf"
 )
 
+type BpfAdditionalMetrics BpfAdditionalMetricsT
+
+type BpfAdditionalMetricsT struct {
+	PktDrops         BpfPktDropsT
+	FlowRtt          uint64
+	NetworkEventsIdx uint8
+	NetworkEvents    [4][8]uint8
+}
+
 type BpfDirectionT uint32
 
 const (
@@ -87,28 +96,18 @@ type BpfFlowIdT struct {
 type BpfFlowMetrics BpfFlowMetricsT
 
 type BpfFlowMetricsT struct {
-	EthProtocol      uint16
-	ObservedIntf     [4]BpfPktObservationT
-	NbObservedIntf   uint8
-	ObservedSrcIps   [4][4]uint8
-	NbObservedSrcIps uint8
-	ObservedDstIps   [4][4]uint8
-	NbObservedDstIps uint8
-	SrcMac           [6]uint8
-	DstMac           [6]uint8
-	Packets          uint32
-	Bytes            uint64
-	StartMonoTimeTs  uint64
-	EndMonoTimeTs    uint64
-	Flags            uint16
-	Errno            uint8
-	Dscp             uint8
-	PktDrops         BpfPktDropsT
-	DnsRecord        BpfDnsRecordT
-	FlowRtt          uint64
-	NetworkEventsIdx uint8
-	NetworkEvents    [4][8]uint8
-	TranslatedFlow   BpfTranslatedFlowT
+	EthProtocol     uint16
+	SrcMac          [6]uint8
+	DstMac          [6]uint8
+	Packets         uint32
+	Bytes           uint64
+	StartMonoTimeTs uint64
+	EndMonoTimeTs   uint64
+	Flags           uint16
+	Errno           uint8
+	Dscp            uint8
+	DnsRecord       BpfDnsRecordT
+	ZoneId          uint16
 }
 
 type BpfFlowRecordT struct {
@@ -139,6 +138,27 @@ const (
 	BpfGlobalCountersKeyTMAX_COUNTERS                        BpfGlobalCountersKeyT = 17
 )
 
+type BpfIpPortT struct {
+	Addr [16]uint8
+	Port uint16
+}
+
+type BpfObservations BpfObservationsT
+
+type BpfObservationsT struct {
+	ObservedIntf   [4]BpfObservedIntfT
+	NbObservedIntf uint8
+	ObservedSrc    [3]BpfIpPortT
+	NbObservedSrc  uint8
+	ObservedDst    [3]BpfIpPortT
+	NbObservedDst  uint8
+}
+
+type BpfObservedIntfT struct {
+	Direction uint8
+	IfIndex   uint32
+}
+
 type BpfPktDropsT struct {
 	Packets         uint32
 	Bytes           uint64
@@ -151,11 +171,6 @@ type BpfPktId struct {
 	SkbRef uint64
 	Hash   uint32
 	Tstamp uint64
-}
-
-type BpfPktObservationT struct {
-	Direction uint8
-	IfIndex   uint32
 }
 
 type BpfTcpFlagsT uint32
@@ -243,13 +258,15 @@ type BpfProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type BpfMapSpecs struct {
-	AggregatedFlows *ebpf.MapSpec `ebpf:"aggregated_flows"`
-	DirectFlows     *ebpf.MapSpec `ebpf:"direct_flows"`
-	DnsFlows        *ebpf.MapSpec `ebpf:"dns_flows"`
-	FilterMap       *ebpf.MapSpec `ebpf:"filter_map"`
-	GlobalCounters  *ebpf.MapSpec `ebpf:"global_counters"`
-	PacketRecord    *ebpf.MapSpec `ebpf:"packet_record"`
-	PktFlowMap      *ebpf.MapSpec `ebpf:"pkt_flow_map"`
+	AdditionalFlowMetrics *ebpf.MapSpec `ebpf:"additional_flow_metrics"`
+	AggregatedFlows       *ebpf.MapSpec `ebpf:"aggregated_flows"`
+	DirectFlows           *ebpf.MapSpec `ebpf:"direct_flows"`
+	DnsFlows              *ebpf.MapSpec `ebpf:"dns_flows"`
+	FilterMap             *ebpf.MapSpec `ebpf:"filter_map"`
+	FlowObservations      *ebpf.MapSpec `ebpf:"flow_observations"`
+	GlobalCounters        *ebpf.MapSpec `ebpf:"global_counters"`
+	PacketRecord          *ebpf.MapSpec `ebpf:"packet_record"`
+	PktFlowMap            *ebpf.MapSpec `ebpf:"pkt_flow_map"`
 }
 
 // BpfObjects contains all objects after they have been loaded into the kernel.
@@ -271,21 +288,25 @@ func (o *BpfObjects) Close() error {
 //
 // It can be passed to LoadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type BpfMaps struct {
-	AggregatedFlows *ebpf.Map `ebpf:"aggregated_flows"`
-	DirectFlows     *ebpf.Map `ebpf:"direct_flows"`
-	DnsFlows        *ebpf.Map `ebpf:"dns_flows"`
-	FilterMap       *ebpf.Map `ebpf:"filter_map"`
-	GlobalCounters  *ebpf.Map `ebpf:"global_counters"`
-	PacketRecord    *ebpf.Map `ebpf:"packet_record"`
-	PktFlowMap      *ebpf.Map `ebpf:"pkt_flow_map"`
+	AdditionalFlowMetrics *ebpf.Map `ebpf:"additional_flow_metrics"`
+	AggregatedFlows       *ebpf.Map `ebpf:"aggregated_flows"`
+	DirectFlows           *ebpf.Map `ebpf:"direct_flows"`
+	DnsFlows              *ebpf.Map `ebpf:"dns_flows"`
+	FilterMap             *ebpf.Map `ebpf:"filter_map"`
+	FlowObservations      *ebpf.Map `ebpf:"flow_observations"`
+	GlobalCounters        *ebpf.Map `ebpf:"global_counters"`
+	PacketRecord          *ebpf.Map `ebpf:"packet_record"`
+	PktFlowMap            *ebpf.Map `ebpf:"pkt_flow_map"`
 }
 
 func (m *BpfMaps) Close() error {
 	return _BpfClose(
+		m.AdditionalFlowMetrics,
 		m.AggregatedFlows,
 		m.DirectFlows,
 		m.DnsFlows,
 		m.FilterMap,
+		m.FlowObservations,
 		m.GlobalCounters,
 		m.PacketRecord,
 		m.PktFlowMap,

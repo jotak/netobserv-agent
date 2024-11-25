@@ -9,15 +9,14 @@
 
 static inline long pkt_drop_lookup_and_update_flow(flow_id *id, u8 state, u16 flags,
                                                    enum skb_drop_reason reason, u64 len) {
-    flow_metrics *aggregate_flow = bpf_map_lookup_elem(&aggregated_flows, id);
+    additional_metrics *aggregate_flow = bpf_map_lookup_elem(&additional_flow_metrics, id);
     if (aggregate_flow != NULL) {
-        aggregate_flow->end_mono_time_ts = bpf_ktime_get_ns();
         aggregate_flow->pkt_drops.packets += 1;
         aggregate_flow->pkt_drops.bytes += len;
         aggregate_flow->pkt_drops.latest_state = state;
         aggregate_flow->pkt_drops.latest_flags = flags;
         aggregate_flow->pkt_drops.latest_drop_cause = reason;
-        long ret = bpf_map_update_elem(&aggregated_flows, id, aggregate_flow, BPF_EXIST);
+        long ret = bpf_map_update_elem(&additional_flow_metrics, id, aggregate_flow, BPF_EXIST);
         if (trace_messages && ret != 0) {
             bpf_printk("error packet drop updating flow %d\n", ret);
         }
@@ -80,17 +79,14 @@ static inline int trace_pkt_drop(void *ctx, u8 state, struct sk_buff *skb,
         return 0;
     }
     // there is no matching flows so lets create new one and add the drops
-    u64 current_time = bpf_ktime_get_ns();
-    flow_metrics new_flow = {
-        .start_mono_time_ts = current_time,
-        .end_mono_time_ts = current_time,
+    additional_metrics new_flow = {
         .pkt_drops.packets = 0,
         .pkt_drops.bytes = 0,
         .pkt_drops.latest_state = state,
         .pkt_drops.latest_flags = flags,
         .pkt_drops.latest_drop_cause = reason,
     };
-    ret = bpf_map_update_elem(&aggregated_flows, &id, &new_flow, BPF_ANY);
+    ret = bpf_map_update_elem(&additional_flow_metrics, &id, &new_flow, BPF_ANY);
     if (trace_messages && ret != 0) {
         bpf_printk("error packet drop creating new flow %d\n", ret);
     }

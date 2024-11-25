@@ -23,8 +23,7 @@ static inline void dump_xlated_flow(struct translated_flow_t *flow) {
     }
 }
 
-static inline void parse_tuple(struct nf_conntrack_tuple *t, struct translated_flow_t *flow,
-                               u16 zone_id, u16 family, bool invert) {
+static inline void parse_tuple(struct nf_conntrack_tuple *t, struct translated_flow_t *flow, u16 zone_id, u16 family, bool invert) {
     __builtin_memset(flow, 0, sizeof(*flow));
     if (invert) {
         flow->dport = bpf_ntohs(t->src.u.all);
@@ -66,9 +65,9 @@ static inline void parse_tuple(struct nf_conntrack_tuple *t, struct translated_f
     dump_xlated_flow(flow);
 }
 
-static inline long translate_lookup_and_update_flow(flow_id *id, u16 flags,
+static inline long translate_lookup_and_update_flow(flow_id *id,
                                                     struct nf_conntrack_tuple *orig_t,
-                                                    struct nf_conntrack_tuple *reply_t, u64 len,
+                                                    struct nf_conntrack_tuple *reply_t,
                                                     u16 zone_id, u16 family) {
     long ret = 0;
     u64 current_time = bpf_ktime_get_ns();
@@ -82,10 +81,12 @@ static inline long translate_lookup_and_update_flow(flow_id *id, u16 flags,
     id->src_port = orig.sport;
     id->dst_port = orig.dport;
 
+    // TODO: look in the packet map first
+
     flow_metrics *aggregate_flow = bpf_map_lookup_elem(&aggregated_flows, id);
     if (aggregate_flow != NULL) {
         aggregate_flow->end_mono_time_ts = current_time;
-        parse_tuple(reply_t, &aggregate_flow->translated_flow, zone_id, family, true);
+        aggregate_flow->zone_id = zone_id;
         ret = bpf_map_update_elem(&aggregated_flows, id, aggregate_flow, BPF_EXIST);
         if (trace_messages && ret != 0) {
             bpf_printk("error packet translation updating flow %d\n", ret);
@@ -93,15 +94,12 @@ static inline long translate_lookup_and_update_flow(flow_id *id, u16 flags,
         return ret;
     }
 
-    // there is no matching flows so lets create new one and add the xlation
+    // there is no matching flows so lets create new empty one and add the xlation
     flow_metrics new_flow = {
         .start_mono_time_ts = current_time,
         .end_mono_time_ts = current_time,
-        .packets = 1,
-        .bytes = len,
-        .flags = flags,
+        .zone_id = zone_id,
     };
-    parse_tuple(reply_t, &new_flow.translated_flow, zone_id, family, true);
     ret = bpf_map_update_elem(&aggregated_flows, id, &new_flow, BPF_ANY);
     if (trace_messages && ret != 0) {
         bpf_printk("error packet translation creating new flow %d\n", ret);
@@ -112,16 +110,18 @@ static inline long translate_lookup_and_update_flow(flow_id *id, u16 flags,
 
 static inline int trace_nat_manip_pkt(struct nf_conn *ct, struct sk_buff *skb) {
     struct nf_conntrack_tuple_hash tuplehash[IP_CT_DIR_MAX];
-    u16 family = 0, flags = 0, zone_id = 0;
+    u16 family = 0, zone_id = 0;
     u8 dscp = 0, protocol = 0;
     long ret = 0;
-    u64 len = 0;
     flow_id id;
+    pkt_info pkt;
 
     if (!enable_pkt_transformation_tracking) {
         return 0;
     }
+    __builtin_memset(&pkt, 0, sizeof(pkt));
     __builtin_memset(&id, 0, sizeof(id));
+    pkt.id = &id;
 
     bpf_probe_read(&tuplehash, sizeof(tuplehash), &ct->tuplehash);
 
@@ -131,40 +131,39 @@ static inline int trace_nat_manip_pkt(struct nf_conn *ct, struct sk_buff *skb) {
     struct nf_conntrack_tuple *orig_tuple = &tuplehash[IP_CT_DIR_ORIGINAL].tuple;
     struct nf_conntrack_tuple *reply_tuple = &tuplehash[IP_CT_DIR_REPLY].tuple;
 
-    len = BPF_CORE_READ(skb, len);
-    id.if_index = BPF_CORE_READ(skb, skb_iif);
+    pkt.if_index = BPF_CORE_READ(skb, skb_iif);
     // read L2 info
-    core_fill_in_l2(skb, &id, &family);
+    core_fill_in_l2(skb, &pkt, &family);
 
     // read L3 info
-    core_fill_in_l3(skb, &id, family, &protocol, &dscp);
+    core_fill_in_l3(skb, &pkt, family, &protocol, &dscp);
 
     // read L4 info
     switch (protocol) {
     case IPPROTO_TCP:
-        core_fill_in_tcp(skb, &id, &flags);
+        core_fill_in_tcp(skb, &pkt);
         break;
     case IPPROTO_UDP:
-        core_fill_in_udp(skb, &id);
+        core_fill_in_udp(skb, &pkt);
         break;
     case IPPROTO_SCTP:
-        core_fill_in_sctp(skb, &id);
+        core_fill_in_sctp(skb, &pkt);
         break;
     case IPPROTO_ICMP:
-        core_fill_in_icmpv4(skb, &id);
+        core_fill_in_icmpv4(skb, &pkt);
         break;
     case IPPROTO_ICMPV6:
-        core_fill_in_icmpv6(skb, &id);
+        core_fill_in_icmpv6(skb, &pkt);
         break;
     default:
         fill_in_others_protocol(&id, protocol);
     }
 
-    BPF_PRINTK("Xlat: protocol %d flags 0x%x family %d dscp %d\n", protocol, flags, family, dscp);
+    BPF_PRINTK("Xlat: protocol %d flags 0x%x family %d dscp %d\n", protocol, pkt.flags, family, dscp);
 
     bpf_probe_read(&zone_id, sizeof(zone_id), &ct->zone.id);
     ret =
-        translate_lookup_and_update_flow(&id, flags, orig_tuple, reply_tuple, len, zone_id, family);
+        translate_lookup_and_update_flow(&id, orig_tuple, reply_tuple, zone_id, family);
 
     return ret;
 }

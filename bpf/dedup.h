@@ -7,58 +7,51 @@
 
 #include "utils.h"
 
-static inline bool add_observation(flow_metrics *aggregate_flow, u32 if_index, u8 direction,
-                                   u8 *src_ip, u8 *dst_ip) {
+static inline bool add_observation(observations *obs, u32 if_index, u8 direction, ip_port *src, ip_port *dst) {
     bool changed = false;
-    if (aggregate_flow->nb_observed_intf < MAX_FLOW_OBSERVATIONS) {
+    if (obs->nb_observed_intf < MAX_OBSERVED_INTERFACES) {
         bool found = false;
-        for (u8 i = 0; i < aggregate_flow->nb_observed_intf; i++) {
-            if (aggregate_flow->observed_intf[i].if_index == if_index &&
-                aggregate_flow->observed_intf[i].direction == direction) {
+        for (u8 i = 0; i < obs->nb_observed_intf; i++) {
+            if (obs->observed_intf[i].if_index == if_index &&
+                obs->observed_intf[i].direction == direction) {
                 found = true;
                 break;
             }
         }
         if (!found) {
-            aggregate_flow->observed_intf[aggregate_flow->nb_observed_intf].if_index = if_index;
-            aggregate_flow->observed_intf[aggregate_flow->nb_observed_intf].direction = direction;
-            aggregate_flow->nb_observed_intf++;
+            obs->observed_intf[obs->nb_observed_intf].if_index = if_index;
+            obs->observed_intf[obs->nb_observed_intf].direction = direction;
+            obs->nb_observed_intf++;
             changed = true;
         }
     }
-    if (src_ip != NULL && aggregate_flow->nb_observed_src_ips < MAX_FLOW_OBSERVATIONS) {
+    if (src != NULL && obs->nb_observed_src < MAX_OBSERVED_IPS) {
         bool found = false;
-        for (u8 i = 0; i < aggregate_flow->nb_observed_src_ips; i++) {
-            if (__builtin_memcmp(aggregate_flow->observed_src_ips[i], src_ip + sizeof(ip4in6),
-                                 sizeof(aggregate_flow->observed_src_ips[i])) == 0) {
+        for (u8 i = 0; i < obs->nb_observed_src; i++) {
+            if (__builtin_memcmp(obs->observed_src[i].addr, src->addr, IP_MAX_LEN) == 0) {
                 found = true;
                 break;
             }
         }
         if (!found) {
-            __builtin_memcpy(
-                aggregate_flow->observed_src_ips[aggregate_flow->nb_observed_src_ips],
-                src_ip + sizeof(ip4in6),
-                sizeof(aggregate_flow->observed_src_ips[aggregate_flow->nb_observed_src_ips]));
-            aggregate_flow->nb_observed_src_ips++;
+            __builtin_memcpy(obs->observed_src[obs->nb_observed_src].addr, src->addr, IP_MAX_LEN);
+            obs->observed_src[obs->nb_observed_src].port = src->port;
+            obs->nb_observed_src++;
             changed = true;
         }
     }
-    if (dst_ip != NULL && aggregate_flow->nb_observed_dst_ips < MAX_FLOW_OBSERVATIONS) {
+    if (dst != NULL && obs->nb_observed_dst < MAX_OBSERVED_IPS) {
         bool found = false;
-        for (u8 i = 0; i < aggregate_flow->nb_observed_dst_ips; i++) {
-            if (__builtin_memcmp(aggregate_flow->observed_dst_ips[i], dst_ip + sizeof(ip4in6),
-                                 sizeof(aggregate_flow->observed_dst_ips[i])) == 0) {
+        for (u8 i = 0; i < obs->nb_observed_dst; i++) {
+            if (__builtin_memcmp(obs->observed_dst[i].addr, dst->addr, IP_MAX_LEN) == 0) {
                 found = true;
                 break;
             }
         }
         if (!found) {
-            __builtin_memcpy(
-                aggregate_flow->observed_dst_ips[aggregate_flow->nb_observed_dst_ips],
-                dst_ip + sizeof(ip4in6),
-                sizeof(aggregate_flow->observed_dst_ips[aggregate_flow->nb_observed_src_ips]));
-            aggregate_flow->nb_observed_dst_ips++;
+            __builtin_memcpy(obs->observed_dst[obs->nb_observed_dst].addr, dst->addr, IP_MAX_LEN);
+            obs->observed_dst[obs->nb_observed_dst].port = dst->port;
+            obs->nb_observed_dst++;
             changed = true;
         }
     }
@@ -110,7 +103,7 @@ static inline flow_id *get_or_add_flow_for_packet(flow_id *fid, pkt_id *pkt_hash
 
 // Check if the packet was already seen, add additional data to the flow (IPs, interface...) if that's a duplicate observation.
 // Return 0 for duplicate, 1 for non-duplicate, 2 for duplicate but with unknown flow
-static inline int check_dup(struct __sk_buff *skb, u8 direction, pkt_info *pkt) {
+static inline int deduplicate(struct __sk_buff *skb, u8 direction, pkt_info *pkt) {
     // Set "unique" identifier for this packet
     pkt_id pkt_hash_ts;
     __builtin_memset(&pkt_hash_ts, 0, sizeof(pkt_hash_ts));
@@ -142,49 +135,69 @@ static inline int check_dup(struct __sk_buff *skb, u8 direction, pkt_info *pkt) 
     }
 
     // Have we already seen this packet and created a flow?
-    flow_id *existing_flow_id =
-        get_or_add_flow_for_packet(pkt->id, &pkt_hash_ts, &pkt_addr_ts, &pkt_hash_addr, mark);
-    if (existing_flow_id != NULL) {
+    flow_id *flow = get_or_add_flow_for_packet(pkt->id, &pkt_hash_ts, &pkt_addr_ts, &pkt_hash_addr, mark);
+    if (flow != NULL) {
         increase_counter(PKT_MAP_HIT);
-        u8 *additional_src_ip = NULL, *additional_dst_ip = NULL;
-        if (pkt->eth_protocol ==
-                ETH_P_IP && // only support ipv4 currently for additional IPs, to avoid stack-too-large
-            __builtin_memcmp(existing_flow_id->src_ip, pkt->id->src_ip, IP_MAX_LEN) != 0) {
-            additional_src_ip = pkt->id->src_ip;
+        ip_port additional_src = {
+            .port = pkt->id->src_port,
+        };
+        ip_port *p_src = &additional_src;
+        ip_port additional_dst = {
+            .port = pkt->id->dst_port,
+        };
+        ip_port *p_dst = &additional_dst;
+        // If packet IPs are same as existing flow id, we don't add them as observed IPs
+        if (__builtin_memcmp(flow->src_ip, pkt->id->src_ip, IP_MAX_LEN) == 0) {
+            p_src = NULL;
+        } else {
+            __builtin_memcpy(p_src->addr, pkt->id->src_ip, IP_MAX_LEN);
         }
-        if (pkt->eth_protocol ==
-                ETH_P_IP && // only support ipv4 currently for additional IPs, to avoid stack-too-large
-            __builtin_memcmp(existing_flow_id->dst_ip, pkt->id->dst_ip, IP_MAX_LEN) != 0) {
-            additional_dst_ip = pkt->id->dst_ip;
+        if (__builtin_memcmp(flow->dst_ip, pkt->id->dst_ip, IP_MAX_LEN) == 0) {
+            p_dst = NULL;
+        } else {
+            __builtin_memcpy(p_dst->addr, pkt->id->dst_ip, IP_MAX_LEN);
         }
         // Only add observation info, no more
-        flow_metrics *aggregate_flow =
-            (flow_metrics *)bpf_map_lookup_elem(&aggregated_flows, existing_flow_id);
-        if (aggregate_flow != NULL) {
-            if (add_observation(aggregate_flow, skb->ifindex, direction, additional_src_ip,
-                                additional_dst_ip)) {
-                bpf_map_update_elem(&aggregated_flows, existing_flow_id, aggregate_flow, BPF_EXIST);
+        observations *obs = (observations *)bpf_map_lookup_elem(&flow_observations, flow);
+        if (obs != NULL) {
+            if (add_observation(obs, skb->ifindex, direction, p_src, p_dst)) {
+                bpf_map_update_elem(&flow_observations, flow, obs, BPF_EXIST);
             }
         } else {
             // Flow might exist in another per-CPU map, or was flushed recently.
             // Create empty flow with just observation info
-            u64 current_ts = bpf_ktime_get_ns(); // Record the current time first.
-            flow_metrics new_flow = {
-                .start_mono_time_ts = current_ts,
-                .end_mono_time_ts = current_ts,
-            };
-            add_observation(&new_flow, skb->ifindex, direction, additional_src_ip,
-                            additional_dst_ip);
-            bpf_map_update_elem(&aggregated_flows, existing_flow_id, &new_flow, BPF_NOEXIST);
+            observations new_obs = {};
+            add_observation(&new_obs, skb->ifindex, direction, p_src, p_dst);
+            bpf_map_update_elem(&flow_observations, flow, &new_obs, BPF_NOEXIST);
         }
         return 0;
     }
 
+    // Map miss
     increase_counter(PKT_MAP_MISS);
-
     if (mark == mark_bit) {
         // We reached this point despite mark being set, meaning we went into a map-miss for an already seen packet (e.g. due to skb address change)
         increase_counter(PKT_MAP_POTENTIAL_DUPLICATION);
+    }
+
+    // Add observation
+    observations *obs = (observations *)bpf_map_lookup_elem(&flow_observations, pkt->id);
+    if (obs != NULL) {
+        // We don't add observed IPs that are already in the key (flowid)
+        if (add_observation(obs, skb->ifindex, direction, NULL, NULL)) {
+            bpf_map_update_elem(&flow_observations, pkt->id, obs, BPF_EXIST);
+        }
+    } else {
+        // Create a new observation info
+        struct observed_intf_t intf = {
+            .direction = direction,
+            .if_index = skb->ifindex,
+        };
+        observations obs = {
+            .nb_observed_intf = 1,
+            .observed_intf = {intf},
+        };
+        bpf_map_update_elem(&flow_observations, pkt->id, &obs, BPF_NOEXIST);
     }
     return 1;
 }

@@ -31,27 +31,29 @@ func TestConversions(t *testing.T) {
 		{
 			name: "TCP record",
 			flow: &model.Record{
-				RawRecord: model.RawRecord{
-					Id: ebpf.BpfFlowId{
-						SrcIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x06, 0x07, 0x08, 0x09},
-						DstIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x0a, 0x0b, 0x0c, 0x0d},
-						SrcPort:           23000,
-						DstPort:           443,
-						TransportProtocol: 6,
-					},
-					Metrics: ebpf.BpfFlowMetrics{
-						EthProtocol:    2048,
-						SrcMac:         model.MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
-						DstMac:         model.MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
-						ObservedIntf:   [4]ebpf.BpfPktObservationT{{Direction: model.DirectionEgress}},
-						NbObservedIntf: 1,
-						Bytes:          456,
-						Packets:        123,
-						Flags:          0x100,
-						Dscp:           64,
+				Id: &ebpf.BpfFlowId{
+					SrcIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x06, 0x07, 0x08, 0x09},
+					DstIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x0a, 0x0b, 0x0c, 0x0d},
+					SrcPort:           23000,
+					DstPort:           443,
+					TransportProtocol: 6,
+				},
+				Metrics: &model.BpfFlowPayload{
+					BpfFlowMetrics: &ebpf.BpfFlowMetrics{
+						EthProtocol: 2048,
+						SrcMac:      model.MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
+						DstMac:      model.MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
+						Bytes:       456,
+						Packets:     123,
+						Flags:       0x100,
+						Dscp:        64,
 						DnsRecord: ebpf.BpfDnsRecordT{
 							Errno: 0,
 						},
+					},
+					BpfObservations: &ebpf.BpfObservations{
+						ObservedIntf:   [model.MaxObservedInterfaces]ebpf.BpfObservedIntfT{{Direction: model.DirectionEgress}},
+						NbObservedIntf: 1,
 					},
 				},
 				Interfaces:    []string{"eth0"},
@@ -83,23 +85,25 @@ func TestConversions(t *testing.T) {
 		{
 			name: "UDP record",
 			flow: &model.Record{
-				RawRecord: model.RawRecord{
-					Id: ebpf.BpfFlowId{
-						SrcIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x06, 0x07, 0x08, 0x09},
-						DstIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x0a, 0x0b, 0x0c, 0x0d},
-						SrcPort:           23000,
-						DstPort:           443,
-						TransportProtocol: 17,
+				Id: &ebpf.BpfFlowId{
+					SrcIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x06, 0x07, 0x08, 0x09},
+					DstIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x0a, 0x0b, 0x0c, 0x0d},
+					SrcPort:           23000,
+					DstPort:           443,
+					TransportProtocol: 17,
+				},
+				Metrics: &model.BpfFlowPayload{
+					BpfFlowMetrics: &ebpf.BpfFlowMetrics{
+						EthProtocol: 2048,
+						SrcMac:      model.MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
+						DstMac:      model.MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
+						Bytes:       456,
+						Packets:     123,
+						Dscp:        64,
 					},
-					Metrics: ebpf.BpfFlowMetrics{
-						EthProtocol:    2048,
-						SrcMac:         model.MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
-						DstMac:         model.MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
-						ObservedIntf:   [4]ebpf.BpfPktObservationT{{Direction: model.DirectionEgress}},
+					BpfObservations: &ebpf.BpfObservations{
+						ObservedIntf:   [model.MaxObservedInterfaces]ebpf.BpfObservedIntfT{{Direction: model.DirectionEgress}},
 						NbObservedIntf: 1,
-						Bytes:          456,
-						Packets:        123,
-						Dscp:           64,
 					},
 				},
 				Interfaces:    []string{"eth0"},
@@ -130,23 +134,25 @@ func TestConversions(t *testing.T) {
 		{
 			name: "ICMPv4 record",
 			flow: &model.Record{
-				RawRecord: model.RawRecord{
-					Id: ebpf.BpfFlowId{
-						SrcIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x06, 0x07, 0x08, 0x09},
-						DstIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x0a, 0x0b, 0x0c, 0x0d},
-						TransportProtocol: 1,
-						IcmpType:          8,
-						IcmpCode:          0,
+				Id: &ebpf.BpfFlowId{
+					SrcIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x06, 0x07, 0x08, 0x09},
+					DstIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x0a, 0x0b, 0x0c, 0x0d},
+					TransportProtocol: 1,
+					IcmpType:          8,
+					IcmpCode:          0,
+				},
+				Metrics: &model.BpfFlowPayload{
+					BpfFlowMetrics: &ebpf.BpfFlowMetrics{
+						EthProtocol: 2048,
+						SrcMac:      model.MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
+						DstMac:      model.MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
+						Bytes:       456,
+						Packets:     123,
+						Dscp:        64,
 					},
-					Metrics: ebpf.BpfFlowMetrics{
-						EthProtocol:    2048,
-						SrcMac:         model.MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
-						DstMac:         model.MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
-						ObservedIntf:   [4]ebpf.BpfPktObservationT{{Direction: model.DirectionEgress}},
+					BpfObservations: &ebpf.BpfObservations{
+						ObservedIntf:   [model.MaxObservedInterfaces]ebpf.BpfObservedIntfT{{Direction: model.DirectionEgress}},
 						NbObservedIntf: 1,
-						Bytes:          456,
-						Packets:        123,
-						Dscp:           64,
 					},
 				},
 				Interfaces:    []string{"eth0"},
@@ -177,23 +183,25 @@ func TestConversions(t *testing.T) {
 		{
 			name: "ICMPv6 record",
 			flow: &model.Record{
-				RawRecord: model.RawRecord{
-					Id: ebpf.BpfFlowId{
-						SrcIp:             model.IPAddr{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
-						DstIp:             model.IPAddr{11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26},
-						TransportProtocol: 58,
-						IcmpType:          8,
-						IcmpCode:          0,
+				Id: &ebpf.BpfFlowId{
+					SrcIp:             model.IPAddr{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
+					DstIp:             model.IPAddr{11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26},
+					TransportProtocol: 58,
+					IcmpType:          8,
+					IcmpCode:          0,
+				},
+				Metrics: &model.BpfFlowPayload{
+					BpfFlowMetrics: &ebpf.BpfFlowMetrics{
+						EthProtocol: 0x86dd,
+						SrcMac:      model.MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
+						DstMac:      model.MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
+						Bytes:       456,
+						Packets:     123,
+						Dscp:        64,
 					},
-					Metrics: ebpf.BpfFlowMetrics{
-						EthProtocol:    0x86dd,
-						SrcMac:         model.MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
-						DstMac:         model.MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
-						ObservedIntf:   [4]ebpf.BpfPktObservationT{{Direction: model.DirectionEgress}},
+					BpfObservations: &ebpf.BpfObservations{
+						ObservedIntf:   [model.MaxObservedInterfaces]ebpf.BpfObservedIntfT{{Direction: model.DirectionEgress}},
 						NbObservedIntf: 1,
-						Bytes:          456,
-						Packets:        123,
-						Dscp:           64,
 					},
 				},
 				Interfaces:    []string{"eth0"},
@@ -224,24 +232,26 @@ func TestConversions(t *testing.T) {
 		{
 			name: "ARP layer2",
 			flow: &model.Record{
-				RawRecord: model.RawRecord{
-					Id: ebpf.BpfFlowId{
-						SrcIp:             model.IPAddr{},
-						DstIp:             model.IPAddr{},
-						SrcPort:           0,
-						DstPort:           0,
-						TransportProtocol: 0,
-						IcmpType:          8,
-						IcmpCode:          0,
+				Id: &ebpf.BpfFlowId{
+					SrcIp:             model.IPAddr{},
+					DstIp:             model.IPAddr{},
+					SrcPort:           0,
+					DstPort:           0,
+					TransportProtocol: 0,
+					IcmpType:          8,
+					IcmpCode:          0,
+				},
+				Metrics: &model.BpfFlowPayload{
+					BpfFlowMetrics: &ebpf.BpfFlowMetrics{
+						EthProtocol: 2054, // ARP protocol
+						SrcMac:      model.MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
+						DstMac:      model.MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
+						Bytes:       500,
+						Packets:     128,
 					},
-					Metrics: ebpf.BpfFlowMetrics{
-						EthProtocol:    2054, // ARP protocol
-						SrcMac:         model.MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
-						DstMac:         model.MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
-						ObservedIntf:   [4]ebpf.BpfPktObservationT{{Direction: model.DirectionEgress}},
+					BpfObservations: &ebpf.BpfObservations{
+						ObservedIntf:   [model.MaxObservedInterfaces]ebpf.BpfObservedIntfT{{Direction: model.DirectionEgress}},
 						NbObservedIntf: 1,
-						Bytes:          500,
-						Packets:        128,
 					},
 				},
 				Interfaces:    []string{"eth0"},
@@ -265,22 +275,22 @@ func TestConversions(t *testing.T) {
 		{
 			name: "L2 drops",
 			flow: &model.Record{
-				RawRecord: model.RawRecord{
-					Id: ebpf.BpfFlowId{
-						SrcIp:             model.IPAddr{},
-						DstIp:             model.IPAddr{},
-						SrcPort:           0,
-						DstPort:           0,
-						TransportProtocol: 0,
+				Id: &ebpf.BpfFlowId{
+					SrcIp:             model.IPAddr{},
+					DstIp:             model.IPAddr{},
+					SrcPort:           0,
+					DstPort:           0,
+					TransportProtocol: 0,
+				},
+				Metrics: &model.BpfFlowPayload{
+					BpfFlowMetrics: &ebpf.BpfFlowMetrics{
+						EthProtocol: 2054, // ARP protocol
+						SrcMac:      model.MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
+						DstMac:      model.MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
+						Bytes:       500,
+						Packets:     128,
 					},
-					Metrics: ebpf.BpfFlowMetrics{
-						EthProtocol:    2054, // ARP protocol
-						SrcMac:         model.MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
-						DstMac:         model.MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
-						ObservedIntf:   [4]ebpf.BpfPktObservationT{{Direction: model.DirectionEgress}},
-						NbObservedIntf: 1,
-						Bytes:          500,
-						Packets:        128,
+					BpfAdditionalMetrics: &ebpf.BpfAdditionalMetrics{
 						PktDrops: ebpf.BpfPktDropsT{
 							Packets:         10,
 							Bytes:           100,
@@ -288,6 +298,10 @@ func TestConversions(t *testing.T) {
 							LatestState:     0,
 							LatestDropCause: 2,
 						},
+					},
+					BpfObservations: &ebpf.BpfObservations{
+						ObservedIntf:   [model.MaxObservedInterfaces]ebpf.BpfObservedIntfT{{Direction: model.DirectionEgress}},
+						NbObservedIntf: 1,
 					},
 				},
 				Interfaces:    []string{"eth0"},
@@ -316,24 +330,30 @@ func TestConversions(t *testing.T) {
 		{
 			name: "TCP + drop + DNS + RTT record",
 			flow: &model.Record{
-				RawRecord: model.RawRecord{
-					Id: ebpf.BpfFlowId{
-						SrcIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x06, 0x07, 0x08, 0x09},
-						DstIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x0a, 0x0b, 0x0c, 0x0d},
-						SrcPort:           23000,
-						DstPort:           443,
-						TransportProtocol: 6,
+				Id: &ebpf.BpfFlowId{
+					SrcIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x06, 0x07, 0x08, 0x09},
+					DstIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x0a, 0x0b, 0x0c, 0x0d},
+					SrcPort:           23000,
+					DstPort:           443,
+					TransportProtocol: 6,
+				},
+				Metrics: &model.BpfFlowPayload{
+					BpfFlowMetrics: &ebpf.BpfFlowMetrics{
+						EthProtocol: 2048,
+						SrcMac:      model.MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
+						DstMac:      model.MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
+						Bytes:       456,
+						Packets:     123,
+						Flags:       0x100,
+						Dscp:        64,
+						DnsRecord: ebpf.BpfDnsRecordT{
+							Latency: uint64(someDuration),
+							Id:      1,
+							Flags:   0x8001,
+							Errno:   0,
+						},
 					},
-					Metrics: ebpf.BpfFlowMetrics{
-						EthProtocol:    2048,
-						SrcMac:         model.MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
-						DstMac:         model.MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
-						ObservedIntf:   [4]ebpf.BpfPktObservationT{{Direction: model.DirectionEgress}},
-						NbObservedIntf: 1,
-						Bytes:          456,
-						Packets:        123,
-						Flags:          0x100,
-						Dscp:           64,
+					BpfAdditionalMetrics: &ebpf.BpfAdditionalMetrics{
 						PktDrops: ebpf.BpfPktDropsT{
 							Packets:         10,
 							Bytes:           100,
@@ -341,12 +361,10 @@ func TestConversions(t *testing.T) {
 							LatestState:     6,
 							LatestDropCause: 5,
 						},
-						DnsRecord: ebpf.BpfDnsRecordT{
-							Latency: uint64(someDuration),
-							Id:      1,
-							Flags:   0x8001,
-							Errno:   0,
-						},
+					},
+					BpfObservations: &ebpf.BpfObservations{
+						ObservedIntf:   [model.MaxObservedInterfaces]ebpf.BpfObservedIntfT{{Direction: model.DirectionEgress}},
+						NbObservedIntf: 1,
 					},
 				},
 				Interfaces:    []string{"eth0"},
@@ -390,27 +408,29 @@ func TestConversions(t *testing.T) {
 		{
 			name: "Multiple interfaces record",
 			flow: &model.Record{
-				RawRecord: model.RawRecord{
-					Id: ebpf.BpfFlowId{
-						SrcIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x06, 0x07, 0x08, 0x09},
-						DstIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x0a, 0x0b, 0x0c, 0x0d},
-						SrcPort:           23000,
-						DstPort:           443,
-						TransportProtocol: 6,
-					},
-					Metrics: ebpf.BpfFlowMetrics{
-						EthProtocol:    2048,
-						SrcMac:         model.MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
-						DstMac:         model.MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
-						ObservedIntf:   [4]ebpf.BpfPktObservationT{{Direction: model.DirectionIngress}, {Direction: model.DirectionEgress}},
-						NbObservedIntf: 2,
-						Bytes:          64,
-						Packets:        1,
-						Flags:          0x100,
-						Dscp:           64,
+				Id: &ebpf.BpfFlowId{
+					SrcIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x06, 0x07, 0x08, 0x09},
+					DstIp:             model.IPAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x0a, 0x0b, 0x0c, 0x0d},
+					SrcPort:           23000,
+					DstPort:           443,
+					TransportProtocol: 6,
+				},
+				Metrics: &model.BpfFlowPayload{
+					BpfFlowMetrics: &ebpf.BpfFlowMetrics{
+						EthProtocol: 2048,
+						SrcMac:      model.MacAddr{0x04, 0x05, 0x06, 0x07, 0x08, 0x09},
+						DstMac:      model.MacAddr{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f},
+						Bytes:       64,
+						Packets:     1,
+						Flags:       0x100,
+						Dscp:        64,
 						DnsRecord: ebpf.BpfDnsRecordT{
 							Errno: 0,
 						},
+					},
+					BpfObservations: &ebpf.BpfObservations{
+						ObservedIntf:   [model.MaxObservedInterfaces]ebpf.BpfObservedIntfT{{Direction: model.DirectionIngress}, {Direction: model.DirectionEgress}},
+						NbObservedIntf: 2,
 					},
 				},
 				Interfaces:    []string{"5e6e92caa1d51cf", "eth0"},

@@ -84,17 +84,16 @@ static inline int trace_network_events(struct sk_buff *skb, struct rh_psample_me
         return 0;
     }
 
-    flow_metrics *aggregate_flow = bpf_map_lookup_elem(&aggregated_flows, &id);
+    additional_metrics *aggregate_flow = bpf_map_lookup_elem(&additional_flow_metrics, &id);
     if (aggregate_flow != NULL) {
         u8 idx = aggregate_flow->network_events_idx;
-        aggregate_flow->end_mono_time_ts = bpf_ktime_get_ns();
         // Needed to check length here again to keep JIT verifier happy
         if (idx < MAX_NETWORK_EVENTS && md_len <= MAX_EVENT_MD) {
             if (!md_already_exists(aggregate_flow->network_events, (u8 *)cookie)) {
                 __builtin_memcpy(aggregate_flow->network_events[idx], cookie, MAX_EVENT_MD);
                 aggregate_flow->network_events_idx = (idx + 1) % MAX_NETWORK_EVENTS;
             }
-            ret = bpf_map_update_elem(&aggregated_flows, &id, aggregate_flow, BPF_ANY);
+            ret = bpf_map_update_elem(&additional_flow_metrics, &id, aggregate_flow, BPF_ANY);
             if (ret == 0) {
                 return 0;
             }
@@ -111,17 +110,12 @@ static inline int trace_network_events(struct sk_buff *skb, struct rh_psample_me
     }
 
     // there is no matching flows so lets create new one and add the network event metadata
-    u64 current_time = bpf_ktime_get_ns();
-    flow_metrics new_flow = {
-        .packets = 0,
-        .bytes = 0,
-        .start_mono_time_ts = current_time,
-        .end_mono_time_ts = current_time,
+    additional_metrics new_flow = {
         .network_events_idx = 0,
     };
     bpf_probe_read(new_flow.network_events[0], md_len, user_cookie);
     new_flow.network_events_idx++;
-    ret = bpf_map_update_elem(&aggregated_flows, &id, &new_flow, BPF_ANY);
+    ret = bpf_map_update_elem(&additional_flow_metrics, &id, &new_flow, BPF_ANY);
     if (trace_messages && ret != 0) {
         bpf_printk("error network events creating new flow %d\n", ret);
     }

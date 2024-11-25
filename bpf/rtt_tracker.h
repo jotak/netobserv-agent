@@ -10,13 +10,12 @@
 #include "maps_definition.h"
 
 static inline int rtt_lookup_and_update_flow(flow_id *id, u64 rtt) {
-    flow_metrics *aggregate_flow = bpf_map_lookup_elem(&aggregated_flows, id);
+    additional_metrics *aggregate_flow = bpf_map_lookup_elem(&additional_flow_metrics, id);
     if (aggregate_flow != NULL) {
-        aggregate_flow->end_mono_time_ts = bpf_ktime_get_ns();
         if (aggregate_flow->flow_rtt < rtt) {
             aggregate_flow->flow_rtt = rtt;
         }
-        long ret = bpf_map_update_elem(&aggregated_flows, id, aggregate_flow, BPF_ANY);
+        long ret = bpf_map_update_elem(&additional_flow_metrics, id, aggregate_flow, BPF_ANY);
         if (trace_messages && ret != 0) {
             bpf_printk("error rtt updating flow %d\n", ret);
         }
@@ -78,15 +77,10 @@ static inline int calculate_flow_rtt_tcp(struct sock *sk, struct sk_buff *skb) {
         return 0;
     }
 
-    u64 current_ts = bpf_ktime_get_ns();
-    flow_metrics new_flow = {
-        .packets = 0,
-        .bytes = 0,
-        .start_mono_time_ts = current_ts,
-        .end_mono_time_ts = current_ts,
+    additional_metrics new_flow = {
         .flow_rtt = rtt,
     };
-    ret = bpf_map_update_elem(&aggregated_flows, &id, &new_flow, BPF_ANY);
+    ret = bpf_map_update_elem(&additional_flow_metrics, &id, &new_flow, BPF_ANY);
     if (trace_messages && ret != 0) {
         bpf_printk("error rtt track creating flow %d\n", ret);
     }
