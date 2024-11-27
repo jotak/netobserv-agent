@@ -80,7 +80,7 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
     id.direction = direction;
 
     // check if this packet need to be filtered if filtering feature is enabled
-    bool skip = check_and_do_flow_filtering(&id, pkt.flags, 0);
+    bool skip = check_and_do_flow_filtering(&pkt, 0);
     if (skip) {
         return TC_ACT_OK;
     }
@@ -122,13 +122,10 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
         }
     } else {
         // Key does not exist in the map, and will need to create a new entry.
-        u64 rtt = 0;
-        if (enable_rtt && id.transport_protocol == IPPROTO_TCP) {
-            rtt = MIN_RTT;
-        }
         flow_metrics new_flow = {
             .packets = 1,
             .bytes = skb->len,
+            .eth_protocol = pkt.eth_protocol,
             .start_mono_time_ts = pkt.current_ts,
             .end_mono_time_ts = pkt.current_ts,
             .flags = pkt.flags,
@@ -137,8 +134,9 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
             .dns_record.flags = pkt.dns_flags,
             .dns_record.latency = pkt.dns_latency,
             .dns_record.errno = dns_errno,
-            .flow_rtt = rtt,
         };
+        __builtin_memcpy(new_flow.dst_mac, pkt.dst_mac, ETH_ALEN);
+        __builtin_memcpy(new_flow.src_mac, pkt.src_mac, ETH_ALEN);
 
         // even if we know that the entry is new, another CPU might be concurrently inserting a flow
         // so we need to specify BPF_ANY

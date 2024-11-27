@@ -35,9 +35,9 @@ static __always_inline int is_equal_ip(u8 *ip1, u8 *ip2, u8 len) {
     return 1;
 }
 
-static __always_inline int do_flow_filter_lookup(flow_id *id, struct filter_key_t *key,
+static __always_inline int do_flow_filter_lookup(pkt_info *pkt, struct filter_key_t *key,
                                                  filter_action *action, u8 len, u8 offset,
-                                                 u16 flags, u32 drop_reason) {
+                                                 u32 drop_reason) {
     int result = 0;
 
     struct filter_value_t *rule = (struct filter_value_t *)bpf_map_lookup_elem(&filter_map, key);
@@ -52,16 +52,17 @@ static __always_inline int do_flow_filter_lookup(flow_id *id, struct filter_key_
         }
 
         // match specific rule protocol or use wildcard protocol
-        if (rule->protocol == id->transport_protocol || rule->protocol == 0) {
-            switch (id->transport_protocol) {
+        if (rule->protocol == pkt->id->transport_protocol || rule->protocol == 0) {
+            switch (pkt->id->transport_protocol) {
             case IPPROTO_TCP:
             case IPPROTO_UDP:
             case IPPROTO_SCTP:
                 // dstPort matching
                 if ((rule->dstPortStart != 0 && rule->dstPortEnd == 0) || rule->dstPort1 != 0 ||
                     rule->dstPort2 != 0) {
-                    if (rule->dstPortStart == id->dst_port || rule->dstPort1 == id->dst_port ||
-                        rule->dstPort2 == id->dst_port) {
+                    if (rule->dstPortStart == pkt->id->dst_port ||
+                        rule->dstPort1 == pkt->id->dst_port ||
+                        rule->dstPort2 == pkt->id->dst_port) {
                         BPF_PRINTK("dstPort matched\n");
                         result++;
                     } else {
@@ -69,7 +70,8 @@ static __always_inline int do_flow_filter_lookup(flow_id *id, struct filter_key_
                         goto end;
                     }
                 } else if (rule->dstPortStart != 0 && rule->dstPortEnd != 0) {
-                    if (rule->dstPortStart <= id->dst_port && id->dst_port <= rule->dstPortEnd) {
+                    if (rule->dstPortStart <= pkt->id->dst_port &&
+                        pkt->id->dst_port <= rule->dstPortEnd) {
                         BPF_PRINTK("dstPortStart and dstPortEnd matched\n");
                         result++;
                     } else {
@@ -80,8 +82,9 @@ static __always_inline int do_flow_filter_lookup(flow_id *id, struct filter_key_
                 // srcPort matching
                 if ((rule->srcPortStart != 0 && rule->srcPortEnd == 0) || rule->srcPort1 != 0 ||
                     rule->srcPort2 != 0) {
-                    if (rule->srcPortStart == id->src_port || rule->srcPort1 == id->src_port ||
-                        rule->srcPort2 == id->src_port) {
+                    if (rule->srcPortStart == pkt->id->src_port ||
+                        rule->srcPort1 == pkt->id->src_port ||
+                        rule->srcPort2 == pkt->id->src_port) {
                         BPF_PRINTK("srcPort matched\n");
                         result++;
                     } else {
@@ -89,7 +92,8 @@ static __always_inline int do_flow_filter_lookup(flow_id *id, struct filter_key_
                         goto end;
                     }
                 } else if (rule->srcPortStart != 0 && rule->srcPortEnd != 0) {
-                    if (rule->srcPortStart <= id->src_port && id->src_port <= rule->srcPortEnd) {
+                    if (rule->srcPortStart <= pkt->id->src_port &&
+                        pkt->id->src_port <= rule->srcPortEnd) {
                         BPF_PRINTK("srcPortStart and srcPortEnd matched\n");
                         result++;
                     } else {
@@ -100,9 +104,10 @@ static __always_inline int do_flow_filter_lookup(flow_id *id, struct filter_key_
                 // Generic port matching check for either src or dst port
                 if ((rule->portStart != 0 && rule->portEnd == 0) || rule->port1 != 0 ||
                     rule->port2 != 0) {
-                    if (rule->portStart == id->src_port || rule->portStart == id->dst_port ||
-                        rule->port1 == id->src_port || rule->port1 == id->dst_port ||
-                        rule->port2 == id->src_port || rule->port2 == id->dst_port) {
+                    if (rule->portStart == pkt->id->src_port ||
+                        rule->portStart == pkt->id->dst_port || rule->port1 == pkt->id->src_port ||
+                        rule->port1 == pkt->id->dst_port || rule->port2 == pkt->id->src_port ||
+                        rule->port2 == pkt->id->dst_port) {
                         BPF_PRINTK("port matched\n");
                         result++;
                     } else {
@@ -110,8 +115,10 @@ static __always_inline int do_flow_filter_lookup(flow_id *id, struct filter_key_
                         goto end;
                     }
                 } else if (rule->portStart != 0 && rule->portEnd != 0) {
-                    if ((rule->portStart <= id->src_port && id->src_port <= rule->portEnd) ||
-                        (rule->portStart <= id->dst_port && id->dst_port <= rule->portEnd)) {
+                    if ((rule->portStart <= pkt->id->src_port &&
+                         pkt->id->src_port <= rule->portEnd) ||
+                        (rule->portStart <= pkt->id->dst_port &&
+                         pkt->id->dst_port <= rule->portEnd)) {
                         BPF_PRINTK("portStart and portEnd matched\n");
                         result++;
                     } else {
@@ -120,9 +127,9 @@ static __always_inline int do_flow_filter_lookup(flow_id *id, struct filter_key_
                     }
                 }
                 // for TCP only check TCP flags if its set
-                if (id->transport_protocol == IPPROTO_TCP) {
+                if (pkt->id->transport_protocol == IPPROTO_TCP) {
                     if (rule->tcpFlags != 0) {
-                        if (rule->tcpFlags == flags) {
+                        if (rule->tcpFlags == pkt->flags) {
                             BPF_PRINTK("tcpFlags matched\n");
                             result++;
                         } else {
@@ -135,7 +142,7 @@ static __always_inline int do_flow_filter_lookup(flow_id *id, struct filter_key_
             case IPPROTO_ICMP:
             case IPPROTO_ICMPV6:
                 if (rule->icmpType != 0) {
-                    if (rule->icmpType == id->icmp_type) {
+                    if (rule->icmpType == pkt->id->icmp_type) {
                         BPF_PRINTK("icmpType matched\n");
                         result++;
                     } else {
@@ -143,7 +150,7 @@ static __always_inline int do_flow_filter_lookup(flow_id *id, struct filter_key_
                         goto end;
                     }
                     if (rule->icmpCode != 0) {
-                        if (rule->icmpCode == id->icmp_code) {
+                        if (rule->icmpCode == pkt->id->icmp_code) {
                             BPF_PRINTK("icmpCode matched\n");
                             result++;
                         } else {
@@ -161,8 +168,8 @@ static __always_inline int do_flow_filter_lookup(flow_id *id, struct filter_key_
 
         if (!is_zero_ip(rule->ip, len)) {
             // for Ingress side we can filter using dstIP and for Egress side we can filter using srcIP
-            if (id->direction == INGRESS) {
-                if (is_equal_ip(rule->ip, id->dst_ip + offset, len)) {
+            if (pkt->id->direction == INGRESS) {
+                if (is_equal_ip(rule->ip, pkt->id->dst_ip + offset, len)) {
                     BPF_PRINTK("dstIP matched\n");
                     result++;
                 } else {
@@ -170,7 +177,7 @@ static __always_inline int do_flow_filter_lookup(flow_id *id, struct filter_key_
                     goto end;
                 }
             } else {
-                if (is_equal_ip(rule->ip, id->src_ip + offset, len)) {
+                if (is_equal_ip(rule->ip, pkt->id->src_ip + offset, len)) {
                     BPF_PRINTK("srcIP matched\n");
                     result++;
                 } else {
@@ -181,7 +188,7 @@ static __always_inline int do_flow_filter_lookup(flow_id *id, struct filter_key_
         }
 
         if (rule->direction != MAX_DIRECTION) {
-            if (rule->direction == id->direction) {
+            if (rule->direction == pkt->id->direction) {
                 BPF_PRINTK("direction matched\n");
                 result++;
             } else {
@@ -205,25 +212,25 @@ end:
     return result;
 }
 
-static __always_inline int flow_filter_setup_lookup_key(flow_id *id, struct filter_key_t *key,
+static __always_inline int flow_filter_setup_lookup_key(pkt_info *pkt, struct filter_key_t *key,
                                                         u8 *len, u8 *offset, bool use_src_ip) {
 
-    if (id->eth_protocol == ETH_P_IP) {
+    if (pkt->eth_protocol == ETH_P_IP) {
         *len = sizeof(u32);
         *offset = sizeof(ip4in6);
         if (use_src_ip) {
-            __builtin_memcpy(key->ip_data, id->src_ip + *offset, *len);
+            __builtin_memcpy(key->ip_data, pkt->id->src_ip + *offset, *len);
         } else {
-            __builtin_memcpy(key->ip_data, id->dst_ip + *offset, *len);
+            __builtin_memcpy(key->ip_data, pkt->id->dst_ip + *offset, *len);
         }
         key->prefix_len = 32;
-    } else if (id->eth_protocol == ETH_P_IPV6) {
+    } else if (pkt->eth_protocol == ETH_P_IPV6) {
         *len = IP_MAX_LEN;
         *offset = 0;
         if (use_src_ip) {
-            __builtin_memcpy(key->ip_data, id->src_ip + *offset, *len);
+            __builtin_memcpy(key->ip_data, pkt->id->src_ip + *offset, *len);
         } else {
-            __builtin_memcpy(key->ip_data, id->dst_ip + *offset, *len);
+            __builtin_memcpy(key->ip_data, pkt->id->dst_ip + *offset, *len);
         }
         key->prefix_len = 128;
     } else {
@@ -235,8 +242,7 @@ static __always_inline int flow_filter_setup_lookup_key(flow_id *id, struct filt
 /*
  * check if the flow match filter rule and return >= 1 if the flow is to be dropped
  */
-static __always_inline int is_flow_filtered(flow_id *id, filter_action *action, u16 flags,
-                                            u32 drop_reason) {
+static __always_inline int is_flow_filtered(pkt_info *pkt, filter_action *action, u32 drop_reason) {
     struct filter_key_t key;
     u8 len, offset;
     int result = 0;
@@ -245,24 +251,24 @@ static __always_inline int is_flow_filtered(flow_id *id, filter_action *action, 
     *action = MAX_FILTER_ACTIONS;
 
     // Lets do first CIDR match using srcIP.
-    result = flow_filter_setup_lookup_key(id, &key, &len, &offset, true);
+    result = flow_filter_setup_lookup_key(pkt, &key, &len, &offset, true);
     if (result < 0) {
         return result;
     }
 
-    result = do_flow_filter_lookup(id, &key, action, len, offset, flags, drop_reason);
+    result = do_flow_filter_lookup(pkt, &key, action, len, offset, drop_reason);
     // we have a match so return
     if (result > 0) {
         return result;
     }
 
     // if we can't find a match then Lets do second CIDR match using dstIP.
-    result = flow_filter_setup_lookup_key(id, &key, &len, &offset, false);
+    result = flow_filter_setup_lookup_key(pkt, &key, &len, &offset, false);
     if (result < 0) {
         return result;
     }
 
-    return do_flow_filter_lookup(id, &key, action, len, offset, flags, drop_reason);
+    return do_flow_filter_lookup(pkt, &key, action, len, offset, drop_reason);
 }
 
 #endif //__FLOWS_FILTER_H__

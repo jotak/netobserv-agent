@@ -22,7 +22,7 @@ const MacLen = 6
 const (
 	IPv6Type                 = 0x86DD
 	networkEventsMaxEventsMD = 8
-	maxNetworkEvents         = 4
+	MaxNetworkEvents         = 4
 )
 
 type HumanBytes uint64
@@ -40,7 +40,9 @@ type RawRecord ebpf.BpfFlowRecordT
 
 // Record contains accumulated metrics from a flow
 type Record struct {
-	RawRecord
+	ID      ebpf.BpfFlowId
+	Metrics BpfFlowContent
+
 	// TODO: redundant field from RecordMetrics. Reorganize structs
 	TimeFlowStart time.Time
 	TimeFlowEnd   time.Time
@@ -64,7 +66,7 @@ type Record struct {
 
 func NewRecord(
 	key ebpf.BpfFlowId,
-	metrics *ebpf.BpfFlowMetrics,
+	metrics *BpfFlowContent,
 	currentTime time.Time,
 	monotonicCurrentTime uint64,
 ) *Record {
@@ -72,15 +74,13 @@ func NewRecord(
 	endDelta := time.Duration(monotonicCurrentTime - metrics.EndMonoTimeTs)
 
 	var record = Record{
-		RawRecord: RawRecord{
-			Id:      key,
-			Metrics: *metrics,
-		},
+		ID:            key,
+		Metrics:       *metrics,
 		TimeFlowStart: currentTime.Add(-startDelta),
 		TimeFlowEnd:   currentTime.Add(-endDelta),
 	}
-	if metrics.FlowRtt != 0 {
-		record.TimeFlowRtt = time.Duration(metrics.FlowRtt)
+	if metrics.AdditionalMetrics != nil && metrics.AdditionalMetrics.FlowRtt != 0 {
+		record.TimeFlowRtt = time.Duration(metrics.AdditionalMetrics.FlowRtt)
 	}
 	if metrics.DnsRecord.Latency != 0 {
 		record.DNSLatency = time.Duration(metrics.DnsRecord.Latency)
@@ -90,53 +90,7 @@ func NewRecord(
 	return &record
 }
 
-func Accumulate(r *ebpf.BpfFlowMetrics, src *ebpf.BpfFlowMetrics) {
-	// time == 0 if the value has not been yet set
-	if r.StartMonoTimeTs == 0 || (r.StartMonoTimeTs > src.StartMonoTimeTs && src.StartMonoTimeTs != 0) {
-		r.StartMonoTimeTs = src.StartMonoTimeTs
-	}
-	if r.EndMonoTimeTs == 0 || r.EndMonoTimeTs < src.EndMonoTimeTs {
-		r.EndMonoTimeTs = src.EndMonoTimeTs
-	}
-	r.Bytes += src.Bytes
-	r.Packets += src.Packets
-	r.Flags |= src.Flags
-	// Accumulate Drop statistics
-	r.PktDrops.Bytes += src.PktDrops.Bytes
-	r.PktDrops.Packets += src.PktDrops.Packets
-	r.PktDrops.LatestFlags |= src.PktDrops.LatestFlags
-	if src.PktDrops.LatestDropCause != 0 {
-		r.PktDrops.LatestDropCause = src.PktDrops.LatestDropCause
-	}
-	// Accumulate DNS
-	r.DnsRecord.Flags |= src.DnsRecord.Flags
-	if src.DnsRecord.Id != 0 {
-		r.DnsRecord.Id = src.DnsRecord.Id
-	}
-	if r.DnsRecord.Errno != src.DnsRecord.Errno {
-		r.DnsRecord.Errno = src.DnsRecord.Errno
-	}
-	if r.DnsRecord.Latency < src.DnsRecord.Latency {
-		r.DnsRecord.Latency = src.DnsRecord.Latency
-	}
-	// Accumulate RTT
-	if r.FlowRtt < src.FlowRtt {
-		r.FlowRtt = src.FlowRtt
-	}
-	// Accumulate DSCP
-	if src.Dscp != 0 {
-		r.Dscp = src.Dscp
-	}
-
-	for _, md := range src.NetworkEvents {
-		if !AllZerosMetaData(md) && !networkEventsMDExist(r.NetworkEvents, md) {
-			copy(r.NetworkEvents[r.NetworkEventsIdx][:], md[:])
-			r.NetworkEventsIdx = (r.NetworkEventsIdx + 1) % maxNetworkEvents
-		}
-	}
-}
-
-func networkEventsMDExist(events [maxNetworkEvents][networkEventsMaxEventsMD]uint8, md [networkEventsMaxEventsMD]uint8) bool {
+func networkEventsMDExist(events [MaxNetworkEvents][networkEventsMaxEventsMD]uint8, md [networkEventsMaxEventsMD]uint8) bool {
 	for _, e := range events {
 		if reflect.DeepEqual(e, md) {
 			return true
