@@ -79,15 +79,13 @@ static inline void update_dns(additional_metrics *extra_metrics, pkt_info *pkt, 
 }
 
 static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
-    u32 filter_sampling = 0;
-
-    if (!is_filter_enabled()) {
+    if (!has_filter_sampling) {
+        // When no filter sampling is defined, run the sampling check at the earliest for better performances
+        // If sampling is defined, will only parse 1 out of "sampling" flows
         if (sampling > 1 && (bpf_get_prandom_u32() % sampling) != 0) {
             do_sampling = 0;
             return TC_ACT_OK;
         }
-        filter_sampling = sampling;
-        do_sampling = 1;
     }
 
     u16 eth_protocol = 0;
@@ -114,11 +112,14 @@ static inline int flow_monitor(struct __sk_buff *skb, u8 direction) {
     id.direction = direction;
 
     // check if this packet need to be filtered if filtering feature is enabled
-    if (is_filter_enabled()) {
-        bool skip = check_and_do_flow_filtering(&id, pkt.flags, 0, eth_protocol, &filter_sampling);
-        if (skip) {
-            return TC_ACT_OK;
-        }
+    u32 filter_sampling = 0;
+    bool skip = check_and_do_flow_filtering(&id, pkt.flags, 0, eth_protocol, &filter_sampling);
+    if (skip) {
+        return TC_ACT_OK;
+    }
+
+    if (has_filter_sampling) {
+        // When some filter sampling is defined, sampling check has to be run post-filtering
         if (filter_sampling == 0) {
             filter_sampling = sampling;
         }
