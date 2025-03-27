@@ -66,11 +66,3 @@ func (kp *KafkaProto) batchAndSubmit(records []*model.Record) {
 	kp.Metrics.EvictionCounter.WithSource(componentKafka).Inc()
 	kp.Metrics.EvictedFlowsCounter.WithSource(componentKafka).Add(float64(len(records)))
 }
-
-type JSONRecord struct {
-	*model.Record
-	TimeFlowStart   int64
-	TimeFlowEnd     int64
-	TimeFlowStartMs int64
-	TimeFlowEndMs   int64
-}

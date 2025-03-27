@@ -336,7 +336,7 @@ func buildFlowExporter(cfg *Config, m *metrics.Metrics) (node.TerminalFunc[[]*mo
 	case "grpc":
 		return buildGRPCExporter(cfg, m)
 	case "kafka":
-		return buildKafkaExporter(cfg, m)
+		return buildMQExporter(cfg, m)
 	case "ipfix+udp":
 		return buildIPFIXExporter(cfg, "udp")
 	case "ipfix+tcp":
@@ -416,6 +416,17 @@ func buildKafkaExporter(cfg *Config, m *metrics.Metrics) (node.TerminalFunc[[]*m
 		},
 		Metrics: m,
 	}).ExportFlows, nil
+}
+
+func buildMQExporter(cfg *Config, m *metrics.Metrics) (node.TerminalFunc[[]*model.Record], error) {
+	if len(cfg.KafkaBrokers) == 0 {
+		return nil, errors.New("at least one Kafka broker is needed")
+	}
+	mq, err := exporter.NewMQProto(cfg.KafkaBrokers[0], m)
+	if err != nil {
+		return nil, err
+	}
+	return mq.ExportFlows, nil
 }
 
 func buildIPFIXExporter(cfg *Config, proto string) (node.TerminalFunc[[]*model.Record], error) {
