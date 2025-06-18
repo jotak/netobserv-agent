@@ -41,21 +41,7 @@ type retriableEvent struct {
 }
 
 func createInformer(cfg *config.Agent, m *metrics.Metrics) ifaces.Informer {
-	// configure informer for new interfaces
-	var informer ifaces.Informer
-	switch cfg.ListenInterfaces {
-	case config.ListenPoll:
-		ilog.WithField("period", cfg.ListenPollPeriod).Info("listening for new interfaces: use polling")
-		informer = ifaces.NewPoller(cfg.ListenPollPeriod, cfg.BuffersLength)
-	case config.ListenWatch:
-		ilog.Info("listening for new interfaces: use watching")
-		informer = ifaces.NewWatcher(cfg.BuffersLength, m)
-	default:
-		ilog.WithField("providedValue", cfg.ListenInterfaces).Warn("wrong interface listen method. Using file watcher as default")
-		informer = ifaces.NewWatcher(cfg.BuffersLength, m)
-	}
-
-	return informer
+	return ifaces.NewWatcherPoller(cfg.ListenPollPeriod, cfg.BuffersLength, m)
 }
 
 // startInterfaceListener uses an informer to check new/deleted network interfaces. For each running

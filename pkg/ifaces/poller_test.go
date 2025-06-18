@@ -48,11 +48,12 @@ func TestPoller(t *testing.T) {
 			simpleInterface(4, "ovlp", macOverlapped),
 		}, nil
 	}
-	poller := NewPoller(5*time.Millisecond, 10)
+	poller := newCombinedPoller(5*time.Millisecond, 10, &imap{})
 	poller.interfaces = fakeInterfaces
 
-	updates, err := poller.Subscribe(ctx)
-	require.NoError(t, err)
+	updates := make(chan Event, poller.bufLen)
+	go poller.pollForEvents(ctx, netns.None(), "", updates)
+
 	// first poll: two interfaces are added
 	assert.Equal(t,
 		Event{Type: EventAdded, Interface: simpleInterface(1, "foo", macFoo)},

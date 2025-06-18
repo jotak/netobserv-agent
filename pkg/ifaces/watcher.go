@@ -27,30 +27,25 @@ var log = logrus.WithField("component", "ifaces.Watcher")
 // Watcher uses system's netlink to get real-time information events about network interfaces'
 // addition or removal.
 type Watcher struct {
-	bufLen     int
-	current    map[InterfaceKey]Interface
-	mapSize    int
-	interfaces func(handle netns.NsHandle, ns string) ([]Interface, error)
+	bufLen           int
+	activeInterfaces imap
 	// linkSubscriber abstracts netlink.LinkSubscribe implementation, allowing the injection of
 	// mocks for unit testing
 	linkSubscriberAt func(ns netns.NsHandle, ch chan<- netlink.LinkUpdate, done <-chan struct{}) error
-	mutex            *sync.Mutex
 	netnsWatcher     *fsnotify.Watcher
 	nsDone           sync.Map
+	poller           *Poller
 }
 
-func NewWatcher(bufLen int, m *metrics.Metrics) *Watcher {
-	current := map[InterfaceKey]Interface{}
+func NewWatcherPoller(period time.Duration, bufLen int, m *metrics.Metrics) *Watcher {
 	w := &Watcher{
 		bufLen:           bufLen,
-		current:          current,
-		interfaces:       netInterfaces,
 		linkSubscriberAt: netlink.LinkSubscribeAt,
-		mutex:            &sync.Mutex{},
 		netnsWatcher:     &fsnotify.Watcher{},
 		nsDone:           sync.Map{},
 	}
-	m.CreateInterfaceBufferGauge("watcher", func() float64 { return float64(w.mapSize) })
+	m.CreateInterfaceBufferGauge("watcher", func() float64 { return float64(w.activeInterfaces.len()) })
+	w.poller = newCombinedPoller(period, bufLen, &w.activeInterfaces)
 	return w
 }
 
@@ -118,22 +113,8 @@ func (w *Watcher) sendUpdates(ctx context.Context, ns string, out chan Event) {
 		return
 	}
 
-	// before sending netlink updates, send all the existing interfaces at the moment of starting
-	// the Watcher
-	if netnsHandle.IsOpen() || netnsHandle.Equal(netns.None()) {
-		if names, err := w.interfaces(netnsHandle, ns); err != nil {
-			log.WithError(err).Error("can't fetch network interfaces. You might be missing flows")
-		} else {
-			for _, name := range names {
-				iface := NewInterface(name.Index, name.Name, name.MAC, netnsHandle, ns)
-				w.mutex.Lock()
-				w.current[iface.InterfaceKey] = iface
-				w.mapSize = len(w.current)
-				w.mutex.Unlock()
-				out <- Event{Type: EventAdded, Interface: iface}
-			}
-		}
-	}
+	// Start poller
+	go w.poller.pollForEvents(ctx, netnsHandle, ns, out)
 
 	for link := range links {
 		attrs := link.Attrs()
@@ -147,7 +128,6 @@ func (w *Watcher) sendUpdates(ctx context.Context, ns string, out chan Event) {
 			continue
 		}
 		iface := NewInterface(attrs.Index, attrs.Name, mac, netnsHandle, ns)
-		w.mutex.Lock()
 		if link.Flags&(syscall.IFF_UP|syscall.IFF_RUNNING) != 0 && attrs.OperState == netlink.OperUp {
 			log.WithFields(logrus.Fields{
 				"operstate": attrs.OperState,
@@ -155,8 +135,8 @@ func (w *Watcher) sendUpdates(ctx context.Context, ns string, out chan Event) {
 				"name":      attrs.Name,
 				"netns":     netnsHandle.String(),
 			}).Debug("Interface up and running")
-			if _, ok := w.current[iface.InterfaceKey]; !ok {
-				w.current[iface.InterfaceKey] = iface
+			if _, ok := w.activeInterfaces.load(iface.InterfaceKey); !ok {
+				w.activeInterfaces.store(iface.InterfaceKey, iface)
 				out <- Event{Type: EventAdded, Interface: iface}
 			}
 		} else {
@@ -166,13 +146,10 @@ func (w *Watcher) sendUpdates(ctx context.Context, ns string, out chan Event) {
 				"name":      attrs.Name,
 				"netns":     netnsHandle.String(),
 			}).Debug("Interface down or not running")
-			if storedIface, ok := w.current[iface.InterfaceKey]; ok {
-				delete(w.current, iface.InterfaceKey)
+			if storedIface, ok := w.activeInterfaces.delete(iface.InterfaceKey); ok {
 				out <- Event{Type: EventDeleted, Interface: storedIface}
 			}
 		}
-		w.mapSize = len(w.current)
-		w.mutex.Unlock()
 	}
 }
 

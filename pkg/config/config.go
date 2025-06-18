@@ -9,8 +9,6 @@ import (
 var clog = logrus.WithField("component", "config")
 
 const (
-	ListenPoll       = "poll"
-	ListenWatch      = "watch"
 	DirectionIngress = "ingress"
 	DirectionEgress  = "egress"
 	DirectionBoth    = "both"
@@ -147,12 +145,6 @@ type Agent struct {
 	// TCAttachRetries defines the number of retries in case of attach/detach failures.
 	// Valid only for 'tc' and 'tcx' attach modes.
 	TCAttachRetries int `env:"TC_ATTACH_RETRIES" envDefault:"4"`
-	// ListenInterfaces specifies the mechanism used by the agent to listen for added or removed
-	// network interfaces. Accepted values are "watch" (default) or "poll".
-	// If the value is "watch", interfaces are traced immediately after they are created. This is
-	// the recommended setting for most configurations. "poll" value is a fallback mechanism that
-	// periodically queries the current network interfaces (frequency specified by ListenPollPeriod).
-	ListenInterfaces string `env:"LISTEN_INTERFACES" envDefault:"watch"`
 	// ListenPollPeriod specifies the periodicity to query the network interfaces when the
 	// ListenInterfaces value is set to "poll".
 	ListenPollPeriod time.Duration `env:"LISTEN_POLL_PERIOD" envDefault:"10s"`
@@ -265,19 +257,25 @@ type Agent struct {
 	FlowsTargetPort int `env:"FLOWS_TARGET_PORT"`
 	// Deprecated PCAServerPort replaced by TargetPort
 	PCAServerPort int `env:"PCA_SERVER_PORT"`
+	// Deprecated and unused ListenInterfaces, replaced with combined watcher+poller
+	ListenInterfaces string `env:"LISTEN_INTERFACES"`
 }
 
 func ManageDeprecatedConfigs(cfg *Agent) {
 	if len(cfg.FlowsTargetHost) != 0 {
-		clog.Infof("Using deprecated FlowsTargetHost %s", cfg.FlowsTargetHost)
+		clog.Infof("Using deprecated FLOWS_TARGET_HOST %s", cfg.FlowsTargetHost)
 		cfg.TargetHost = cfg.FlowsTargetHost
 	}
 
 	if cfg.FlowsTargetPort != 0 {
-		clog.Infof("Using deprecated FlowsTargetPort %d", cfg.FlowsTargetPort)
+		clog.Infof("Using deprecated FLOWS_TARGET_PORT %d", cfg.FlowsTargetPort)
 		cfg.TargetPort = cfg.FlowsTargetPort
 	} else if cfg.PCAServerPort != 0 {
-		clog.Infof("Using deprecated PCAServerPort %d", cfg.PCAServerPort)
+		clog.Infof("Using deprecated PCA_SERVER_PORT %d", cfg.PCAServerPort)
 		cfg.TargetPort = cfg.PCAServerPort
+	}
+
+	if cfg.ListenInterfaces != "" {
+		clog.Infof("Using deprecated LISTEN_INTERFACES %s", cfg.ListenInterfaces)
 	}
 }

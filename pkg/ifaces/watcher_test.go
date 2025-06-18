@@ -3,8 +3,10 @@ package ifaces
 import (
 	"context"
 	"net"
+	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/netobserv/netobserv-ebpf-agent/pkg/metrics"
 	"github.com/stretchr/testify/assert"
@@ -15,19 +17,23 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func mockNetInterfaces(w *Watcher, interfaces []Interface) {
+	w.poller.interfaces = func(_ netns.NsHandle, _ string) ([]Interface, error) {
+		return interfaces, nil
+	}
+}
+
 func TestWatcher(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	watcher := NewWatcher(10, metrics.NoOp())
+	watcher := NewWatcherPoller(5*time.Minute, 10, metrics.NoOp())
 	// mock net.Interfaces and linkSubscriber to control which interfaces are discovered
-	watcher.interfaces = func(_ netns.NsHandle, _ string) ([]Interface, error) {
-		return []Interface{
-			simpleInterface(1, "foo", macFoo),
-			simpleInterface(2, "bar", macBar),
-			simpleInterface(3, "baz", macBaz),
-		}, nil
-	}
+	mockNetInterfaces(watcher, []Interface{
+		simpleInterface(1, "foo", macFoo),
+		simpleInterface(2, "bar", macBar),
+		simpleInterface(3, "baz", macBaz),
+	})
 	inputLinks := make(chan netlink.LinkUpdate, 10)
 	watcher.linkSubscriberAt = func(_ netns.NsHandle, ch chan<- netlink.LinkUpdate, _ <-chan struct{}) error {
 		go func() {
@@ -68,6 +74,70 @@ func TestWatcher(t *testing.T) {
 	inputLinks <- upAndRunning("foo", 1, macFoo[:], netns.None())
 	inputLinks <- down("bar", 2, macBar[:], netns.None())
 	inputLinks <- down("eth0", 3, macBaz[:], netns.None())
+
+	select {
+	case ev := <-outputEvents:
+		require.Failf(t, "unexpected event", "%#v", ev)
+	default:
+		// ok!
+	}
+}
+
+func TestWatcherAndPoller(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	step := atomic.Uint32{}
+	watcher := NewWatcherPoller(500*time.Millisecond, 10, metrics.NoOp())
+	// Here we simulate:
+	// - Interface "foo" initialized from the Poller (step 0)
+	// - Interface "bar" added through Watcher event (step 1)
+	//		(although there's a small chance that the event is fired from the Poller instead of the Watcher)
+	// - Interface "bar" deleted and "baz" added through Poller, simulating missed event (step 2)
+	watcher.poller.interfaces = func(_ netns.NsHandle, _ string) ([]Interface, error) {
+		switch step.Load() {
+		case 0:
+			return []Interface{simpleInterface(1, "foo", macFoo)}, nil
+		case 1:
+			return []Interface{simpleInterface(1, "foo", macFoo), simpleInterface(2, "bar", macBar)}, nil
+		case 2:
+			return []Interface{simpleInterface(1, "foo", macFoo), simpleInterface(3, "baz", macBaz)}, nil
+		}
+		return nil, nil
+	}
+	inputLinks := make(chan netlink.LinkUpdate, 10)
+	watcher.linkSubscriberAt = func(_ netns.NsHandle, ch chan<- netlink.LinkUpdate, _ <-chan struct{}) error {
+		go func() {
+			for link := range inputLinks {
+				ch <- link
+			}
+		}()
+		return nil
+	}
+
+	outputEvents, err := watcher.Subscribe(ctx)
+	require.NoError(t, err)
+
+	// initial set of fetched elements
+	assert.Equal(t,
+		Event{Type: EventAdded, Interface: simpleInterface(1, "foo", macFoo)},
+		getEvent(t, outputEvents, timeout))
+
+	// update via watcher
+	step.Store(1)
+	inputLinks <- upAndRunning("bar", 2, macBar[:], netns.None())
+	assert.Equal(t,
+		Event{Type: EventAdded, Interface: simpleInterface(2, "bar", macBar)},
+		getEvent(t, outputEvents, timeout))
+
+	// update via poller
+	step.Store(2)
+	assert.Equal(t,
+		Event{Type: EventAdded, Interface: simpleInterface(3, "baz", macBaz)},
+		getEvent(t, outputEvents, timeout))
+	assert.Equal(t,
+		Event{Type: EventDeleted, Interface: simpleInterface(2, "bar", macBar)},
+		getEvent(t, outputEvents, timeout))
 
 	select {
 	case ev := <-outputEvents:

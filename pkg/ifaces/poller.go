@@ -12,62 +12,36 @@ import (
 // notifications when interfaces are added or deleted.
 type Poller struct {
 	period     time.Duration
-	current    map[InterfaceKey]Interface
-	interfaces func(handle netns.NsHandle, ns string) ([]Interface, error)
+	sharedMap  *imap
+	interfaces func(handle netns.NsHandle, ns string) ([]Interface, error) // can be changed for mocking
 	bufLen     int
 }
 
-func NewPoller(period time.Duration, bufLen int) *Poller {
+func newCombinedPoller(period time.Duration, bufLen int, sharedMap *imap) *Poller {
 	return &Poller{
 		period:     period,
 		bufLen:     bufLen,
 		interfaces: netInterfaces,
-		current:    map[InterfaceKey]Interface{},
+		sharedMap:  sharedMap,
 	}
 }
 
-func (np *Poller) Subscribe(ctx context.Context) (<-chan Event, error) {
-
-	out := make(chan Event, np.bufLen)
-	netns, err := getNetNS()
-	if err != nil {
-		go np.pollForEvents(ctx, "", out)
-	} else {
-		for _, n := range netns {
-			go np.pollForEvents(ctx, n, out)
-		}
-	}
-	return out, nil
-}
-
-func (np *Poller) pollForEvents(ctx context.Context, ns string, out chan Event) {
+func (np *Poller) pollForEvents(ctx context.Context, netnsHandle netns.NsHandle, ns string, out chan Event) {
 	log := logrus.WithField("component", "ifaces.Poller")
 	log.WithField("period", np.period).Debug("subscribing to Interface events")
 	ticker := time.NewTicker(np.period)
-	var netnsHandle netns.NsHandle
-	var err error
-
-	if ns == "" {
-		netnsHandle = netns.None()
-	} else {
-		netnsHandle, err = netns.GetFromName(ns)
-		if err != nil {
-			return
-		}
-	}
 
 	defer ticker.Stop()
 	for {
 		if ifaces, err := np.interfaces(netnsHandle, ns); err != nil {
-			log.WithError(err).Warn("fetching interface names")
+			log.WithError(err).Error("can't fetch network interfaces: you might be missing flows")
 		} else {
-			log.WithField("names", ifaces).Debug("fetched interface names")
+			log.WithField("names", ifaces).Trace("fetched interface names")
 			np.diffNames(out, ifaces)
 		}
 		select {
 		case <-ctx.Done():
 			log.Debug("stopped")
-			close(out)
 			return
 		case <-ticker.C:
 			// continue after a period
@@ -82,9 +56,9 @@ func (np *Poller) diffNames(events chan Event, ifaces []Interface) {
 	acquired := map[InterfaceKey]struct{}{}
 	for _, iface := range ifaces {
 		acquired[iface.InterfaceKey] = struct{}{}
-		if _, ok := np.current[iface.InterfaceKey]; !ok {
+		if _, ok := np.sharedMap.load(iface.InterfaceKey); !ok {
 			ilog.WithField("interface", iface).Debug("added network interface")
-			np.current[iface.InterfaceKey] = iface
+			np.sharedMap.store(iface.InterfaceKey, iface)
 			events <- Event{
 				Type:      EventAdded,
 				Interface: iface,
@@ -92,14 +66,16 @@ func (np *Poller) diffNames(events chan Event, ifaces []Interface) {
 		}
 	}
 	// Check for deleted interfaces
-	for key, iface := range np.current {
+	np.sharedMap.forEach(func(key InterfaceKey, _ Interface) bool {
 		if _, ok := acquired[key]; !ok {
-			delete(np.current, key)
-			ilog.WithField("interface", iface).Debug("deleted network interface")
-			events <- Event{
-				Type:      EventDeleted,
-				Interface: iface,
+			if iface, deleted := np.sharedMap.delete(key); deleted {
+				ilog.WithField("interface", iface).Debug("deleted network interface")
+				events <- Event{
+					Type:      EventDeleted,
+					Interface: iface,
+				}
 			}
 		}
-	}
+		return true
+	})
 }
