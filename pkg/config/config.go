@@ -247,6 +247,10 @@ type Agent struct {
 	EnableUDNMapping bool `env:"ENABLE_UDN_MAPPING" envDefault:"false"`
 	// EnableIPsecTracking enable tracking IPsec flows encryption
 	EnableIPsecTracking bool `env:"ENABLE_IPSEC_TRACKING" envDefault:"false"`
+	// FakeIPsecPct inject fake IPsec results
+	FakeIPsecPct int `env:"FAKE_IPSEC_PCT" envDefault:"80"`
+	// FakeIPsecErrPct inject fake IPsec results
+	FakeIPsecErrPct int `env:"FAKE_IPSEC_ERR_PCT" envDefault:"10"`
 	// PreferredInterfaceForMACPrefix is a comma-separated list of key=value pairs.
 	// It allows to specify a preference when retrieving interface names per flow in case of index collision, when using multiple network namespaces are used.
 	// This setting is only used when the interface name could not be found for a given index and MAC.

@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"maps"
+	"math/rand/v2"
 	"runtime"
 	"sync"
 	"time"
@@ -32,6 +33,8 @@ type MapTracer struct {
 	timeSpentinLookupAndDelete prometheus.Histogram
 	s                          *ovnobserv.SampleDecoder
 	udnEnabled                 bool
+	fakeIPsec                  int
+	fakeIPsecErr               int
 }
 
 type mapFetcher interface {
@@ -40,7 +43,7 @@ type mapFetcher interface {
 }
 
 func NewMapTracer(fetcher mapFetcher, evictionTimeout, staleEntriesEvictTimeout time.Duration, m *metrics.Metrics,
-	s *ovnobserv.SampleDecoder, udnEnabled bool) *MapTracer {
+	s *ovnobserv.SampleDecoder, udnEnabled bool, fakeIPsec, fakeIPsecErr int) *MapTracer {
 	return &MapTracer{
 		mapFetcher:                 fetcher,
 		evictionTimeout:            evictionTimeout,
@@ -50,6 +53,8 @@ func NewMapTracer(fetcher mapFetcher, evictionTimeout, staleEntriesEvictTimeout 
 		timeSpentinLookupAndDelete: m.CreateTimeSpendInLookupAndDelete(),
 		s:                          s,
 		udnEnabled:                 udnEnabled,
+		fakeIPsec:                  fakeIPsec,
+		fakeIPsecErr:               fakeIPsecErr,
 	}
 }
 
@@ -119,6 +124,19 @@ func (m *MapTracer) evictFlows(ctx context.Context, forceGC bool, forwardFlows c
 		}
 	}
 	for flowKey, flowMetrics := range flows {
+		// Inject fake IPsec data
+		if m.fakeIPsec > 0 {
+			if rand.IntN(100) < m.fakeIPsec {
+				if flowMetrics.AdditionalMetrics == nil {
+					flowMetrics.AdditionalMetrics = &ebpf.BpfAdditionalMetrics{}
+				}
+				flowMetrics.AdditionalMetrics.IpsecEncrypted = true
+				if rand.IntN(100) < m.fakeIPsecErr {
+					flowMetrics.AdditionalMetrics.IpsecEncryptedRet = int32(1 + rand.IntN(3))
+				}
+			}
+		}
+
 		forwardingFlows = append(forwardingFlows, model.NewRecord(
 			flowKey,
 			&flowMetrics,
