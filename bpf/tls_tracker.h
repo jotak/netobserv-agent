@@ -51,8 +51,48 @@ static inline void track_tls_version(struct __sk_buff *skb, pkt_info *pkt) {
         if ((bpf_skb_load_bytes(skb, offset, &rec, sizeof(rec))) < 0) {
             return;
         }
+    TODO:
+        faire en sorte
+            d'ignorer la valeur de ssl_version selon les paquets; par exemple, osef dans client-hello, ce
+                qui compte
+                    c'est la version effective donnée par server-hello et utilisée par la suite En
+                        fait,
+            c'est surtout app-data qui compte(?) on peut ajouter pkt->tls_content_type qui permet de
+                définir la façon d'aggreger
+    
+        Idées: on n'a aucune certitude que ce soit du TLS. Donc il faudrait changer d'approche, procéder par étapes:
+        *. À chaque étape, on lit un peu plus loin et on check les valeurs possibles; si inconsistent, return "pas TLS"
+        1. Lecture Record Header; Expect: type==14/15/16/17 ; version=3.0 (sslv3)/3.1(tls1.0 ou client-hello tls1.x)/3.2(tls1.1)/3.3(tls1.2 ou 1.3)
+        2. Si Handshake, lecture handshake header; Expect: type==1/2/0b(certif)/0c/0e/10/ ; if something else we can assume it's an encrypted FINISH
+        3. Si CLIENT_HELLO, lecture; Expect version=030[1-3]
+            3a. Si version=030[1-2]; on retourne un bitfield disant qu'on a eu client hello deprecated
+            3b. Si version=0303, lecture de la suite; on retourne un bitfield disant qu'on a eu client hello
+        4. Si SERVER_HELLO, lecture; Expect version=030[1-3]
+            4a. Si version=030[1-2]; on retourne un bitfield disant qu'on a eu server hello deprecated
+            4b. Si version=0303, lecture de la suite; on retourne un bitfield disant qu'on a eu server hello + version + cipher
+        5. Si Change Cipher: lecture, Expect version=030[1-3]
+        6. Si AppData: lecture, Expect version=030[1-3]
+        7. Si Alert: lecture, Expect version=030[1-3]
+                
+     
+            /*
 
-        switch (rec.content_type) {
+            1.2
+	Handshake, ClientHello: header (4B) + Version (2B, 0303) + Random (32B) + Session (1B=len ??) + Ciphers (1B=len + N) + Compression (1B=len + N) + Extensions Len (2B) + Extensions (repeat: 2B=code, 2B=len, ...)
+
+	Handshake, ServerHello: header (4B) + Version (2B, 0303) + Random (32B) + Session (1B=len ??) + Selected Cipher (2B) + Compression (1B) + Extensions Len (2B) + Extensions (repeat: 2B=code, 2B=len, ...)
+
+1.3
+	Handshake, ClientHello: header (4B) + Version (2B, 0303) + Random (32B) + Session (1B=len, always 0x20??) + Ciphers (1B=len + N) + Compression (2B=0x0100) + Extensions Len (2B) + Extensions (repeat: 2B=code, 2B=len, ...)
+
+	Handshake, ServerHello: header (4B) + Version (2B, 0303) + Random (32B) + Session (1B=len, always 0x20??) + Selected Cipher (2B) + Compression (1B, always 0x00?) + Extensions Len (2B) + Extensions (repeat: 2B=code, 2B=len, ...)
+		Extension - Supported Versions: code=0x002b, len=0x0002, content=0x0304 for 1.3
+
+
+
+            */
+
+    switch (rec.content_type) {
         case CONTENT_TYPE_HANDSHAKE: {
             pkt->ssl_version = ((u16)rec.major) << 8 | rec.minor;
             struct tls_handshake_header handshake;
