@@ -71,38 +71,31 @@ const (
 	BpfFilterActionTMAX_FILTER_ACTIONS BpfFilterActionT = 2
 )
 
-type BpfFilterKeyT struct {
+type BpfFilterCidrKeyT struct {
 	_         structs.HostLayout
 	PrefixLen uint32
 	IpData    [16]uint8
 }
 
+type BpfFilterRuleKeyT struct {
+	_         structs.HostLayout
+	GroupLow  uint16
+	GroupHigh uint16
+}
+
 type BpfFilterValueT struct {
-	_                 structs.HostLayout
-	Protocol          uint8
-	_                 [1]byte
-	DstPortStart      uint16
-	DstPortEnd        uint16
-	DstPort1          uint16
-	DstPort2          uint16
-	SrcPortStart      uint16
-	SrcPortEnd        uint16
-	SrcPort1          uint16
-	SrcPort2          uint16
-	PortStart         uint16
-	PortEnd           uint16
-	Port1             uint16
-	Port2             uint16
-	IcmpType          uint8
-	IcmpCode          uint8
-	Direction         BpfDirectionT
-	Action            BpfFilterActionT
-	TcpFlags          BpfTcpFlagsT
-	FilterDrops       uint8
-	_                 [3]byte
-	Sample            uint32
-	DoPeerCIDR_lookup uint8
-	_                 [3]byte
+	_           structs.HostLayout
+	Ports       [16]uint16
+	SrcPorts    [16]uint16
+	DstPorts    [16]uint16
+	Protocol    uint8
+	IcmpType    uint8
+	IcmpCode    uint8
+	FilterDrops uint8
+	Direction   BpfDirectionT
+	Action      BpfFilterActionT
+	TcpFlags    BpfTcpFlagsT
+	Sample      uint32
 }
 
 type BpfFlowId BpfFlowIdT
@@ -338,15 +331,15 @@ type BpfMapSpecs struct {
 	AggregatedFlowsNetworkEvents *ebpf.MapSpec `ebpf:"aggregated_flows_network_events"`
 	AggregatedFlowsPktDrop       *ebpf.MapSpec `ebpf:"aggregated_flows_pkt_drop"`
 	AggregatedFlowsXlat          *ebpf.MapSpec `ebpf:"aggregated_flows_xlat"`
+	CidrMap                      *ebpf.MapSpec `ebpf:"cidr_map"`
 	DirectFlows                  *ebpf.MapSpec `ebpf:"direct_flows"`
 	DnsFlows                     *ebpf.MapSpec `ebpf:"dns_flows"`
 	DnsNameMap                   *ebpf.MapSpec `ebpf:"dns_name_map"`
-	FilterMap                    *ebpf.MapSpec `ebpf:"filter_map"`
+	FilterRulesMap               *ebpf.MapSpec `ebpf:"filter_rules_map"`
 	GlobalCounters               *ebpf.MapSpec `ebpf:"global_counters"`
 	IpsecEgressMap               *ebpf.MapSpec `ebpf:"ipsec_egress_map"`
 	IpsecIngressMap              *ebpf.MapSpec `ebpf:"ipsec_ingress_map"`
 	PacketRecord                 *ebpf.MapSpec `ebpf:"packet_record"`
-	PeerFilterMap                *ebpf.MapSpec `ebpf:"peer_filter_map"`
 	QuicFlows                    *ebpf.MapSpec `ebpf:"quic_flows"`
 	SslDataEventMap              *ebpf.MapSpec `ebpf:"ssl_data_event_map"`
 }
@@ -367,7 +360,8 @@ type BpfVariableSpecs struct {
 	EnableQuicTracking             *ebpf.VariableSpec `ebpf:"enable_quic_tracking"`
 	EnableRtt                      *ebpf.VariableSpec `ebpf:"enable_rtt"`
 	EnableTlsUsageTracking         *ebpf.VariableSpec `ebpf:"enable_tls_usage_tracking"`
-	FilterKey                      *ebpf.VariableSpec `ebpf:"filter_key"`
+	FilterCidrKey                  *ebpf.VariableSpec `ebpf:"filter_cidr_key"`
+	FilterRuleKey                  *ebpf.VariableSpec `ebpf:"filter_rule_key"`
 	FilterValue                    *ebpf.VariableSpec `ebpf:"filter_value"`
 	HasFilterSampling              *ebpf.VariableSpec `ebpf:"has_filter_sampling"`
 	NetworkEventsMonitoringGroupid *ebpf.VariableSpec `ebpf:"network_events_monitoring_groupid"`
@@ -404,15 +398,15 @@ type BpfMaps struct {
 	AggregatedFlowsNetworkEvents *ebpf.Map `ebpf:"aggregated_flows_network_events"`
 	AggregatedFlowsPktDrop       *ebpf.Map `ebpf:"aggregated_flows_pkt_drop"`
 	AggregatedFlowsXlat          *ebpf.Map `ebpf:"aggregated_flows_xlat"`
+	CidrMap                      *ebpf.Map `ebpf:"cidr_map"`
 	DirectFlows                  *ebpf.Map `ebpf:"direct_flows"`
 	DnsFlows                     *ebpf.Map `ebpf:"dns_flows"`
 	DnsNameMap                   *ebpf.Map `ebpf:"dns_name_map"`
-	FilterMap                    *ebpf.Map `ebpf:"filter_map"`
+	FilterRulesMap               *ebpf.Map `ebpf:"filter_rules_map"`
 	GlobalCounters               *ebpf.Map `ebpf:"global_counters"`
 	IpsecEgressMap               *ebpf.Map `ebpf:"ipsec_egress_map"`
 	IpsecIngressMap              *ebpf.Map `ebpf:"ipsec_ingress_map"`
 	PacketRecord                 *ebpf.Map `ebpf:"packet_record"`
-	PeerFilterMap                *ebpf.Map `ebpf:"peer_filter_map"`
 	QuicFlows                    *ebpf.Map `ebpf:"quic_flows"`
 	SslDataEventMap              *ebpf.Map `ebpf:"ssl_data_event_map"`
 }
@@ -425,15 +419,15 @@ func (m *BpfMaps) Close() error {
 		m.AggregatedFlowsNetworkEvents,
 		m.AggregatedFlowsPktDrop,
 		m.AggregatedFlowsXlat,
+		m.CidrMap,
 		m.DirectFlows,
 		m.DnsFlows,
 		m.DnsNameMap,
-		m.FilterMap,
+		m.FilterRulesMap,
 		m.GlobalCounters,
 		m.IpsecEgressMap,
 		m.IpsecIngressMap,
 		m.PacketRecord,
-		m.PeerFilterMap,
 		m.QuicFlows,
 		m.SslDataEventMap,
 	)
@@ -455,7 +449,8 @@ type BpfVariables struct {
 	EnableQuicTracking             *ebpf.Variable `ebpf:"enable_quic_tracking"`
 	EnableRtt                      *ebpf.Variable `ebpf:"enable_rtt"`
 	EnableTlsUsageTracking         *ebpf.Variable `ebpf:"enable_tls_usage_tracking"`
-	FilterKey                      *ebpf.Variable `ebpf:"filter_key"`
+	FilterCidrKey                  *ebpf.Variable `ebpf:"filter_cidr_key"`
+	FilterRuleKey                  *ebpf.Variable `ebpf:"filter_rule_key"`
 	FilterValue                    *ebpf.Variable `ebpf:"filter_value"`
 	HasFilterSampling              *ebpf.Variable `ebpf:"has_filter_sampling"`
 	NetworkEventsMonitoringGroupid *ebpf.Variable `ebpf:"network_events_monitoring_groupid"`

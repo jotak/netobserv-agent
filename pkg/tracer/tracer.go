@@ -41,8 +41,8 @@ const (
 	additionalFlowMetrics        = "additional_flow_metrics"
 	directFlowsMap               = "direct_flows"
 	dnsLatencyMap                = "dns_flows"
-	filterMap                    = "filter_map"
-	peerFilterMap                = "peer_filter_map"
+	cidrsMap                     = "cidr_map"
+	filterRulesMap               = "filter_rules_map"
 	globalCountersMap            = "global_counters"
 	pcaRecordsMap                = "packet_record"
 	ipsecInputMap                = "ipsec_ingress_map"
@@ -121,7 +121,7 @@ type FlowFetcherConfig struct {
 	EnableIngress bool
 	EnableEgress  bool
 	Debug         bool
-	FilterConfig  []*FilterConfig
+	Filters       *config.FiltersV2Config
 }
 
 type variablesMapping struct {
@@ -139,9 +139,9 @@ func NewFlowFetcher(cfg *FlowFetcherConfig, m *metrics.Metrics) (*FlowFetcher, e
 	var err error
 	objects := ebpf.BpfObjects{}
 	var pinDir string
-	var filter *Filter
-	if len(cfg.FilterConfig) > 0 {
-		filter = NewFilter(cfg.FilterConfig)
+	var filters *Filters
+	if cfg.Filters != nil {
+		filters = NewFilters(cfg.Filters)
 	}
 
 	if !cfg.EbpfProgramManagerMode {
@@ -185,8 +185,8 @@ func NewFlowFetcher(cfg *FlowFetcherConfig, m *metrics.Metrics) (*FlowFetcher, e
 			additionalFlowMetrics,
 			directFlowsMap,
 			dnsLatencyMap,
-			filterMap,
-			peerFilterMap,
+			cidrsMap,
+			filterRulesMap,
 			globalCountersMap,
 			pcaRecordsMap,
 			ipsecInputMap,
@@ -198,7 +198,7 @@ func NewFlowFetcher(cfg *FlowFetcherConfig, m *metrics.Metrics) (*FlowFetcher, e
 			spec.Maps[m].Pinning = 0
 		}
 
-		if err := configureFlowSpecVariables(spec, cfg, filter); err != nil {
+		if err := configureFlowSpecVariables(spec, cfg, filters); err != nil {
 			return nil, fmt.Errorf("loading flow spec variables: %w", err)
 		}
 
@@ -380,11 +380,11 @@ func NewFlowFetcher(cfg *FlowFetcherConfig, m *metrics.Metrics) (*FlowFetcher, e
 			}
 		}
 
-		if filter != nil {
-			if err := loadPinnedMapInto("filter", filterMap, &objects.BpfMaps.FilterMap); err != nil {
+		if filters != nil {
+			if err := loadPinnedMapInto("CIDRs map", cidrsMap, &objects.BpfMaps.CidrMap); err != nil {
 				return nil, err
 			}
-			if err := loadPinnedMapInto("peerfilter", peerFilterMap, &objects.BpfMaps.PeerFilterMap); err != nil {
+			if err := loadPinnedMapInto("filter rules map", filterRulesMap, &objects.BpfMaps.FilterRulesMap); err != nil {
 				return nil, err
 			}
 		}
@@ -424,8 +424,8 @@ func NewFlowFetcher(cfg *FlowFetcherConfig, m *metrics.Metrics) (*FlowFetcher, e
 		}
 	}
 
-	if filter != nil {
-		if err := filter.ProgramFilter(&objects); err != nil {
+	if filters != nil {
+		if err := filters.ProgramFilter(&objects); err != nil {
 			return nil, fmt.Errorf("programming flow filter: %w", err)
 		}
 	}
@@ -906,16 +906,16 @@ func (m *FlowFetcher) Close() error {
 		if err := m.objects.GlobalCounters.Close(); err != nil {
 			errs = append(errs, err)
 		}
-		if err := m.objects.FilterMap.Unpin(); err != nil {
+		if err := m.objects.CidrMap.Unpin(); err != nil {
 			errs = append(errs, err)
 		}
-		if err := m.objects.FilterMap.Close(); err != nil {
+		if err := m.objects.CidrMap.Close(); err != nil {
 			errs = append(errs, err)
 		}
-		if err := m.objects.PeerFilterMap.Unpin(); err != nil {
+		if err := m.objects.FilterRulesMap.Unpin(); err != nil {
 			errs = append(errs, err)
 		}
-		if err := m.objects.PeerFilterMap.Close(); err != nil {
+		if err := m.objects.FilterRulesMap.Close(); err != nil {
 			errs = append(errs, err)
 		}
 		if err := m.objects.IpsecIngressMap.Unpin(); err != nil {
@@ -1340,8 +1340,8 @@ func kernelSpecificLoadAndAssign(oldKernel, rtKernel, supportNetworkEvents bool,
 				AggregatedFlowsXlat:          newObjects.AggregatedFlowsXlat,
 				AdditionalFlowMetrics:        newObjects.AdditionalFlowMetrics,
 				DnsFlows:                     newObjects.DnsFlows,
-				FilterMap:                    newObjects.FilterMap,
-				PeerFilterMap:                newObjects.PeerFilterMap,
+				CidrMap:                      newObjects.CidrMap,
+				FilterRulesMap:               newObjects.FilterRulesMap,
 				GlobalCounters:               newObjects.GlobalCounters,
 				IpsecIngressMap:              newObjects.IpsecIngressMap,
 				IpsecEgressMap:               newObjects.IpsecEgressMap,
@@ -1411,8 +1411,8 @@ func kernelSpecificLoadAndAssign(oldKernel, rtKernel, supportNetworkEvents bool,
 				AggregatedFlowsXlat:          newObjects.AggregatedFlowsXlat,
 				AdditionalFlowMetrics:        newObjects.AdditionalFlowMetrics,
 				DnsFlows:                     newObjects.DnsFlows,
-				FilterMap:                    newObjects.FilterMap,
-				PeerFilterMap:                newObjects.PeerFilterMap,
+				CidrMap:                      newObjects.CidrMap,
+				FilterRulesMap:               newObjects.FilterRulesMap,
 				GlobalCounters:               newObjects.GlobalCounters,
 				IpsecIngressMap:              newObjects.IpsecIngressMap,
 				IpsecEgressMap:               newObjects.IpsecEgressMap,
@@ -1482,8 +1482,8 @@ func kernelSpecificLoadAndAssign(oldKernel, rtKernel, supportNetworkEvents bool,
 				AggregatedFlowsXlat:          newObjects.AggregatedFlowsXlat,
 				AdditionalFlowMetrics:        newObjects.AdditionalFlowMetrics,
 				DnsFlows:                     newObjects.DnsFlows,
-				FilterMap:                    newObjects.FilterMap,
-				PeerFilterMap:                newObjects.PeerFilterMap,
+				CidrMap:                      newObjects.CidrMap,
+				FilterRulesMap:               newObjects.FilterRulesMap,
 				GlobalCounters:               newObjects.GlobalCounters,
 				IpsecIngressMap:              newObjects.IpsecIngressMap,
 				IpsecEgressMap:               newObjects.IpsecEgressMap,
@@ -1553,8 +1553,8 @@ func kernelSpecificLoadAndAssign(oldKernel, rtKernel, supportNetworkEvents bool,
 				AggregatedFlowsXlat:          newObjects.AggregatedFlowsXlat,
 				AdditionalFlowMetrics:        newObjects.AdditionalFlowMetrics,
 				DnsFlows:                     newObjects.DnsFlows,
-				FilterMap:                    newObjects.FilterMap,
-				PeerFilterMap:                newObjects.PeerFilterMap,
+				CidrMap:                      newObjects.CidrMap,
+				FilterRulesMap:               newObjects.FilterRulesMap,
 				GlobalCounters:               newObjects.GlobalCounters,
 				IpsecIngressMap:              newObjects.IpsecIngressMap,
 				IpsecEgressMap:               newObjects.IpsecEgressMap,
@@ -1629,8 +1629,8 @@ func NewPacketFetcher(cfg *FlowFetcherConfig) (*PacketFetcher, error) {
 		additionalFlowMetrics,
 		directFlowsMap,
 		dnsLatencyMap,
-		filterMap,
-		peerFilterMap,
+		cidrsMap,
+		filterRulesMap,
 		globalCountersMap,
 		pcaRecordsMap,
 		ipsecInputMap,
@@ -1718,12 +1718,12 @@ func NewPacketFetcher(cfg *FlowFetcherConfig) (*PacketFetcher, error) {
 		BpfMaps: ebpf.BpfMaps{
 			PacketRecord:    newObjects.PacketRecord,
 			SslDataEventMap: newObjects.SslDataEventMap,
-			FilterMap:       newObjects.FilterMap,
-			PeerFilterMap:   newObjects.PeerFilterMap,
+			CidrMap:         newObjects.CidrMap,
+			FilterRulesMap:  newObjects.FilterRulesMap,
 		},
 	}
 
-	f := NewFilter(cfg.FilterConfig)
+	f := NewFilters(cfg.Filters)
 	if err := f.ProgramFilter(&objects); err != nil {
 		return nil, fmt.Errorf("programming flow filter: %w", err)
 	}
@@ -2126,7 +2126,7 @@ func setVariable(spec *cilium.CollectionSpec, key string, value interface{}) err
 	return nil
 }
 
-func configureFlowSpecVariables(spec *cilium.CollectionSpec, cfg *FlowFetcherConfig, filter *Filter) error {
+func configureFlowSpecVariables(spec *cilium.CollectionSpec, cfg *FlowFetcherConfig, filters *Filters) error {
 	traceMsgs := 0
 	if cfg.Debug {
 		traceMsgs = 1
@@ -2148,12 +2148,12 @@ func configureFlowSpecVariables(spec *cilium.CollectionSpec, cfg *FlowFetcherCon
 	}
 	enableFlowFiltering := 0
 	hasFilterSampling := uint8(0)
-	if filter != nil {
+	if filters != nil {
 		enableFlowFiltering = 1
-		hasFilterSampling = filter.hasSampling()
+		hasFilterSampling = filters.hasSampling()
 	} else {
-		spec.Maps[filterMap].MaxEntries = 1
-		spec.Maps[peerFilterMap].MaxEntries = 1
+		spec.Maps[cidrsMap].MaxEntries = 1
+		spec.Maps[filterRulesMap].MaxEntries = 1
 	}
 	enableNetworkEventsMonitoring := 0
 	if cfg.EnableNetworkEventsMonitoring {

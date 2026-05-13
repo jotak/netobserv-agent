@@ -74,6 +74,8 @@ typedef __u64 u64;
 
 #define MISC_FLAGS_SSL_MISMATCH 0x01
 
+#define FILTER_MAX_PORTS 16
+
 // Per-CPU temporary storage for DNS name (avoids stack limit)
 typedef struct dns_name_buffer_t {
     char name[DNS_NAME_MAX_LEN];
@@ -277,14 +279,14 @@ typedef enum global_counters_key_t {
 // Force emitting enums/structs into the ELF
 const enum global_counters_key_t *unused9 __attribute__((unused));
 
-// filter key used as key to LPM map to filter out flows that are not interesting for the user
-struct filter_key_t {
+// filter key used as key to LPM map to identify IP group
+struct filter_cidr_key_t {
     u32 prefix_len;
     u8 ip_data[IP_MAX_LEN];
-} filter_key;
+} filter_cidr_key;
 
 // Force emitting enums/structs into the ELF
-const static struct filter_key_t *unused10 __attribute__((unused));
+const static struct filter_cidr_key_t *unused10 __attribute__((unused));
 
 // Enum to define filter action
 typedef enum filter_action_t {
@@ -296,29 +298,19 @@ typedef enum filter_action_t {
 // Force emitting enums/structs into the ELF
 const static enum filter_action_t *unused11 __attribute__((unused));
 
-// filter value used as value from LPM map lookup to filter out flows that are not interesting for the user
+// filter value used as value from hash map lookup to filter out flows that are not interesting for the user
 struct filter_value_t {
+    u16 ports[FILTER_MAX_PORTS];
+    u16 src_ports[FILTER_MAX_PORTS];
+    u16 dst_ports[FILTER_MAX_PORTS];
     u8 protocol;
-    u16 dstPortStart;
-    u16 dstPortEnd;
-    u16 dstPort1;
-    u16 dstPort2;
-    u16 srcPortStart;
-    u16 srcPortEnd;
-    u16 srcPort1;
-    u16 srcPort2;
-    u16 portStart;
-    u16 portEnd;
-    u16 port1;
-    u16 port2;
-    u8 icmpType;
-    u8 icmpCode;
+    u8 icmp_type;
+    u8 icmp_code;
+    u8 filter_drops;
     direction direction;
     filter_action action;
-    tcp_flags tcpFlags;
-    u8 filter_drops;
+    tcp_flags tcp_flags;
     u32 sample;
-    u8 do_peerCIDR_lookup;
 } filter_value;
 
 // Force emitting enums/structs into the ELF
@@ -357,5 +349,14 @@ typedef enum quic_config_t {
 
 // Force emitting enums/structs into the ELF/BTF (for bpf2go -type quic_config_t)
 const static enum quic_config_t *unused16 __attribute__((unused, used));
+
+// filter key used as key to hash map to filter out flows that are not interesting for the user
+struct filter_rule_key_t {
+    u16 group_low;
+    u16 group_high;
+} filter_rule_key;
+
+// Force emitting enums/structs into the ELF
+const static struct filter_rule_key_t *unused17 __attribute__((unused));
 
 #endif /* __TYPES_H__ */

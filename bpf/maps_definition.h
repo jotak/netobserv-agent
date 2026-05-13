@@ -109,22 +109,22 @@ struct {
 // LPM trie map used to filter traffic by IP address CIDR
 struct {
     __uint(type, BPF_MAP_TYPE_LPM_TRIE);
-    __type(key, struct filter_key_t);
+    __type(key, struct filter_cidr_key_t);
+    __type(value, u16);
+    __uint(max_entries, MAX_FILTER_ENTRIES);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} cidr_map SEC(".maps");
+
+// map storing filtering rules
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, struct filter_rule_key_t);
     __type(value, struct filter_value_t);
     __uint(max_entries, MAX_FILTER_ENTRIES);
     __uint(map_flags, BPF_F_NO_PREALLOC);
     __uint(pinning, LIBBPF_PIN_BY_NAME);
-} filter_map SEC(".maps");
-
-// LPM trie map used to filter traffic by peer IP address CIDR
-struct {
-    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
-    __type(key, struct filter_key_t);
-    __type(value, u8);
-    __uint(max_entries, MAX_FILTER_ENTRIES);
-    __uint(map_flags, BPF_F_NO_PREALLOC);
-    __uint(pinning, LIBBPF_PIN_BY_NAME);
-} peer_filter_map SEC(".maps");
+} filter_rules_map SEC(".maps");
 
 // HashMap to store ingress flowid to be able to retrieve them from kretprobe hook
 struct {
